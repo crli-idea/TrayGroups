@@ -1,0 +1,95 @@
+#include <windows.h>
+1 ICON "TrayGroups.ico"
+1 RT_MANIFEST "TrayGroups.manifest"
+1 VERSIONINFO
+FILEVERSION 1,0,0,0
+PRODUCTVERSION 1,0,0,0
+FILEOS VOS_NT_WINDOWS32
+FILETYPE VFT_APP
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904b0"
+    BEGIN
+      VALUE "FileDescription", "TrayGroups\0"
+      VALUE "ProductName", "TrayGroups\0"
+      VALUE "FileVersion", "1.0.0\0"
+      VALUE "OriginalFilename", "TrayGroups.exe\0"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x409, 1200
+  END
+END
+
+#pragma code_page(65001)
+#include <commctrl.h>
+#include "TraySettingsIds.h"
+
+
+IDD_SETTINGS DIALOGEX 0, 0, 520, 300
+STYLE DS_SHELLFONT | DS_MODALFRAME | WS_POPUP | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX
+EXSTYLE WS_EX_APPWINDOW | WS_EX_CONTROLPARENT
+CAPTION "TrayGroups 设置"
+FONT 9, "Microsoft YaHei UI", 400, 0, 134
+BEGIN
+    CONTROL "", IDC_SETTINGS_TABS, WC_TABCONTROL, WS_TABSTOP, 7, 7, 506, 260
+    CONTROL "", -1, "Static", SS_ETCHEDHORZ, 7, 274, 506, 1
+    PUSHBUTTON "资源占用", IDC_RESOURCES, 7, 280, 62, 14
+    LTEXT "配置保存在 groups.ini", -1, 78, 283, 180, 10
+    DEFPUSHBUTTON "应用", IDC_APPLY, 383, 280, 62, 14
+    PUSHBUTTON "关闭", IDC_CLOSE, 451, 280, 62, 14
+END
+
+IDD_GROUPS DIALOGEX 0, 0, 498, 240
+STYLE DS_SHELLFONT | DS_CONTROL | WS_CHILD
+EXSTYLE WS_EX_CONTROLPARENT
+FONT 9, "Microsoft YaHei UI", 400, 0, 134
+BEGIN
+    LTEXT "选择托盘图标，为它分配一个组。按住 Ctrl 可以多选。", -1, 9, 8, 480, 10
+    CONTROL "", IDC_ICON_LIST, WC_LISTVIEW, LVS_REPORT | LVS_SHOWSELALWAYS | WS_BORDER | WS_TABSTOP, 9, 24, 480, 135
+    GROUPBOX "分配到分组", -1, 9, 167, 480, 64
+    LTEXT "组名：", -1, 20, 184, 48, 10
+    COMBOBOX IDC_GROUP, 73, 181, 302, 95, CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP
+    PUSHBUTTON "取消分组", IDC_UNGROUP, 389, 181, 88, 14
+    LTEXT "作用范围：", -1, 20, 208, 48, 10
+    COMBOBOX IDC_SCOPE, 73, 205, 302, 75, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+END
+
+IDD_APPEARANCE DIALOGEX 0, 0, 498, 240
+STYLE DS_SHELLFONT | DS_CONTROL | WS_CHILD
+EXSTYLE WS_EX_CONTROLPARENT
+FONT 9, "Microsoft YaHei UI", 400, 0, 134
+BEGIN
+    GROUPBOX "分组标签", -1, 9, 8, 480, 139
+    LTEXT "分组：", -1, 20, 29, 58, 10
+    COMBOBOX IDC_APPEARANCE_GROUP, 88, 26, 300, 95, CBS_DROPDOWN | CBS_AUTOHSCROLL | WS_VSCROLL | WS_TABSTOP
+    LTEXT "字号：", -1, 20, 56, 58, 10
+    EDITTEXT IDC_LABEL_SIZE, 88, 53, 46, 14, ES_NUMBER | WS_TABSTOP
+    LTEXT "磅，8–32", -1, 146, 56, 230, 10
+    LTEXT "宽度：", -1, 20, 83, 58, 10
+    EDITTEXT IDC_LABEL_WIDTH, 88, 80, 46, 14, ES_NUMBER | WS_TABSTOP
+    LTEXT "逻辑像素，120–600", -1, 146, 83, 250, 10
+    LTEXT "高度：", -1, 20, 110, 58, 10
+    EDITTEXT IDC_LABEL_HEIGHT, 88, 107, 46, 14, ES_NUMBER | WS_TABSTOP
+    LTEXT "逻辑像素，32–160；0 为自动", -1, 146, 110, 320, 10
+    GROUPBOX "使用说明", -1, 9, 157, 480, 74
+    LTEXT "每个分组独立保存标签大小。先选择或输入组名，再修改数值。\n切换分组会保留当前修改；点击“应用”后保存到本地配置。\n关闭窗口放弃尚未应用的修改。", -1, 20, 175, 454, 42
+END
+
+IDD_ADVANCED DIALOGEX 0, 0, 498, 240
+STYLE DS_SHELLFONT | DS_CONTROL | WS_CHILD
+EXSTYLE WS_EX_CONTROLPARENT
+FONT 9, "Microsoft YaHei UI", 400, 0, 134
+BEGIN
+    GROUPBOX "图标识别", -1, 9, 8, 480, 74
+    LTEXT "识别方式：", -1, 20, 29, 58, 10
+    COMBOBOX IDC_MATCH, 88, 26, 387, 75, CBS_DROPDOWNLIST | WS_VSCROLL | WS_TABSTOP
+    LTEXT "优先使用程序路径与 GUID；无 GUID 时按窗口类别和编号识别。\n匹配不明确时保留原图标，重新选择图标并应用即可确认。", -1, 20, 49, 454, 25
+    GROUPBOX "原图标折叠", -1, 9, 92, 480, 68
+    AUTOCHECKBOX "隐藏已分组的原图标，退出时恢复", IDC_FOLD, 20, 111, 454, 12
+    LTEXT "T 中只显示已隐藏的分组图标。隐藏未成功时，原图标留在 Windows。", -1, 20, 134, 454, 18
+    GROUPBOX "本地配置", -1, 9, 170, 480, 61
+    LTEXT "设置保存在程序旁的 groups.ini。\n手动编辑后，右键 T 选择“重新加载配置并刷新”。\n设置窗口会记住上次位置。", -1, 20, 187, 454, 36
+END
