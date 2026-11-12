@@ -28,17 +28,20 @@ jobs:
           update: true
           install: mingw-w64-x86_64-gcc mingw-w64-x86_64-zlib
 
-      - name: Build both programs
+      - name: Build TrayGroups
         shell: pwsh
         run: .\build.ps1
+
+      - name: Test screenshot module
+        shell: pwsh
+        run: .\ScreenCaptureTimer\test\run.ps1
 
       - name: Package portable binaries
         shell: pwsh
         run: |
           $stage = Join-Path $env:RUNNER_TEMP 'traygroups-release'
           New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item test\build\TrayGroups.exe, ScreenCaptureTimer\test\build\ScreenCaptureTimer.exe, README.md -Destination $stage
-          Copy-Item ScreenCaptureTimer\README.md (Join-Path $stage 'ScreenCaptureTimer-README.md')
+          Copy-Item test\build\TrayGroups.exe, README.md -Destination $stage
           Compress-Archive -Path (Join-Path $stage '*') -DestinationPath "test\build\TrayGroups-$env:RELEASE_TAG-windows-x64.zip" -Force
 
       - name: Publish release
@@ -47,9 +50,9 @@ jobs:
           tag_name: ${{ env.RELEASE_TAG }}
           name: TrayGroups ${{ env.RELEASE_TAG }}
           body: |
-            Portable Windows release containing TrayGroups and ScreenCaptureTimer.
+            Portable Windows release with TrayGroups grouping and scheduled multi-monitor capture in one executable.
 
-            Both programs keep configuration beside their executable. Extract them to a writable folder before running.
+            Configuration and screenshot output stay beside the executable. Extract it to a writable folder before running.
           files: test/build/TrayGroups-${{ env.RELEASE_TAG }}-windows-x64.zip
           fail_on_unmatched_files: true
           make_latest: true

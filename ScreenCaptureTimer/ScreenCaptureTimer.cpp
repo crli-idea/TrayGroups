@@ -13,7 +13,11 @@
 #include <atomic>
 #include <string>
 #include <vector>
+#ifndef SCREEN_CAPTURE_EMBEDDED
 #include "NativeResources.h"
+#endif
+
+namespace CaptureTimer {
 
 static const wchar_t* AppClass=L"Crli.ScreenCaptureTimer.Native";
 static const UINT NotifyMessage=WM_APP+1,WorkerDone=WM_APP+2,StopMessage=WM_APP+3;
@@ -101,13 +105,13 @@ static DWORD WINAPI Worker(void* p){Settings* s=(Settings*)p;Capture(*s);delete 
 static void QueueCapture(){if(locked||busy.exchange(true)){Log(L"SKIP locked or busy");return;}Log(L"CAPTURE QUEUED");Settings* s=new Settings(settings);HANDLE thread=CreateThread(nullptr,256*1024,Worker,s,STACK_SIZE_PARAM_IS_A_RESERVATION,nullptr);if(thread)CloseHandle(thread);else{delete s;busy=false;Log(L"CAPTURE ERROR cannot create worker");}}
 static std::wstring ResourceText(bool json=false){auto m=NativeResources::Read();wchar_t b[1800];static ULONGLONG lastWall=0;static double lastCpu=0;ULONGLONG now=GetTickCount64();SYSTEM_INFO sys;GetSystemInfo(&sys);double percent=lastWall&&now>lastWall?(m.cpuSeconds-lastCpu)*100000.0/(now-lastWall)/std::max(1ul,sys.dwNumberOfProcessors):0;lastWall=now;lastCpu=m.cpuSeconds;
     if(json)swprintf_s(b,L"{\"pid\":%lu,\"taskManagerPrivateWorkingSetBytes\":%llu,\"privateBytes\":%llu,\"totalWorkingSetBytes\":%llu,\"capturePeakPrivateWorkingSetBytes\":%llu,\"cpuSeconds\":%.3f,\"cpuPercent\":%.3f}",GetCurrentProcessId(),(unsigned long long)m.privateWorking,(unsigned long long)m.privateCommit,(unsigned long long)m.working,(unsigned long long)capturePeak.load(),m.cpuSeconds,percent);
-    else swprintf_s(b,L"ScreenCaptureTimer · 原生流式截图\r\n\r\n任务管理器口径（专用工作集）：%.2f MiB\r\n专用提交内存：%.2f MiB\r\n总工作集（含共享内存）：%.2f MiB\r\n最近截图采样峰值（专用工作集）：%.2f MiB\r\nCPU 当前：%.2f %%    累计：%.2f 秒\r\n\r\n每个程序 < 3 MiB：%ls\r\n不强制清空工作集。",m.privateWorking/1048576.0,m.privateCommit/1048576.0,m.working/1048576.0,capturePeak.load()/1048576.0,percent,m.cpuSeconds,m.privateWorking<3*1048576?L"当前达到":L"当前未达到");return b;}
-static HWND Control(HWND h,const wchar_t* cls,const wchar_t* text,DWORD style,int x,int y,int width,int height,int id){HWND c=CreateWindowExW(0,cls,text,WS_CHILD|WS_VISIBLE|WS_TABSTOP|style,x,y,width,height,h,(HMENU)(INT_PTR)id,GetModuleHandleW(nullptr),nullptr);SendMessageW(c,WM_SETFONT,(WPARAM)font,TRUE);return c;}
+    else swprintf_s(b,L"TrayGroups 定时截图\r\n\r\n任务管理器口径（专用工作集）：%.2f MiB\r\n专用提交内存：%.2f MiB\r\n总工作集（含共享内存）：%.2f MiB\r\n最近截图采样峰值（进程专用工作集）：%.2f MiB\r\nCPU 当前：%.2f %%    累计：%.2f 秒\r\n\r\n不强制清空工作集。",m.privateWorking/1048576.0,m.privateCommit/1048576.0,m.working/1048576.0,capturePeak.load()/1048576.0,percent,m.cpuSeconds);return b;}
+static HWND CaptureControl(HWND h,const wchar_t* cls,const wchar_t* text,DWORD style,int x,int y,int width,int height,int id){HWND c=CreateWindowExW(0,cls,text,WS_CHILD|WS_VISIBLE|WS_TABSTOP|style,x,y,width,height,h,(HMENU)(INT_PTR)id,GetModuleHandleW(nullptr),nullptr);SendMessageW(c,WM_SETFONT,(WPARAM)font,TRUE);return c;}
 static void ShowResources();
 static LRESULT CALLBACK ResourceProc(HWND h,UINT msg,WPARAM w,LPARAM l){if(msg==WM_TIMER){SetWindowTextW(resourceLabel,ResourceText().c_str());return 0;}if(msg==WM_DESTROY){KillTimer(h,1);resourcesWindow=nullptr;return 0;}return DefWindowProcW(h,msg,w,l);}
-static void ShowResources(){if(resourcesWindow){ShowWindow(resourcesWindow,SW_RESTORE);SetForegroundWindow(resourcesWindow);return;}resourcesWindow=CreateWindowExW(WS_EX_APPWINDOW,L"Crli.Capture.Resources",L"截图程序 · 资源占用",WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,550,350,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);resourceLabel=Control(resourcesWindow,L"STATIC",ResourceText().c_str(),0,15,15,510,280,0);SetTimer(resourcesWindow,1,1000,nullptr);ShowWindow(resourcesWindow,SW_RESTORE);SetWindowPos(resourcesWindow,HWND_TOP,50,50,550,350,SWP_SHOWWINDOW);SetForegroundWindow(resourcesWindow);}
+static void ShowResources(){if(resourcesWindow){ShowWindow(resourcesWindow,SW_RESTORE);SetForegroundWindow(resourcesWindow);return;}resourcesWindow=CreateWindowExW(WS_EX_APPWINDOW,L"Crli.Capture.Resources",L"截图程序 · 资源占用",WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,550,350,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);resourceLabel=CaptureControl(resourcesWindow,L"STATIC",ResourceText().c_str(),0,15,15,510,280,0);SetTimer(resourcesWindow,1,1000,nullptr);ShowWindow(resourcesWindow,SW_RESTORE);SetWindowPos(resourcesWindow,HWND_TOP,50,50,550,350,SWP_SHOWWINDOW);SetForegroundWindow(resourcesWindow);}
 static LRESULT CALLBACK SettingsProc(HWND h,UINT msg,WPARAM w,LPARAM l){if(msg==WM_COMMAND&&LOWORD(w)==1){wchar_t dir[32768],format[256];GetWindowTextW(dirEdit,dir,32768);GetWindowTextW(formatEdit,format,256);Settings changed;changed.directory=Trim(dir);changed.format=Trim(format);SYSTEMTIME t;GetLocalTime(&t);if(changed.directory.size()<3||!(changed.directory[1]==L':'||(changed.directory[0]==L'\\'&&changed.directory[1]==L'\\'))||FormatName(changed.format,t).empty()){MessageBoxW(h,L"请输入完整保存路径，以及 HH-mm、HH-mm-ss 等文件名格式。",L"设置",MB_ICONWARNING);return 0;}if(!MakeDirectories(changed.directory)||!Save(changed)){MessageBoxW(h,L"目录或设置无法保存。",L"设置",MB_ICONERROR);return 0;}settings=changed;DestroyWindow(h);return 0;}if(msg==WM_COMMAND&&LOWORD(w)==2){ShowResources();return 0;}if(msg==WM_DESTROY){settingsWindow=nullptr;return 0;}return DefWindowProcW(h,msg,w,l);}
-static void ShowSettings(){if(settingsWindow){ShowWindow(settingsWindow,SW_RESTORE);SetForegroundWindow(settingsWindow);return;}settingsWindow=CreateWindowExW(WS_EX_APPWINDOW,L"Crli.Capture.Settings",L"定时双屏截图 · 设置",WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,660,265,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);Control(settingsWindow,L"STATIC",L"保存根目录（粘贴完整路径；自动在下面按天建文件夹）",0,15,15,620,22,0);dirEdit=Control(settingsWindow,L"EDIT",settings.directory.c_str(),WS_BORDER|ES_AUTOHSCROLL,15,43,615,28,10);Control(settingsWindow,L"STATIC",L"文件名格式：HH-mm 为 24 小时制，例如 16-10.png",0,15,88,615,22,0);formatEdit=Control(settingsWindow,L"EDIT",settings.format.c_str(),WS_BORDER|ES_AUTOHSCROLL,15,116,615,28,11);Control(settingsWindow,L"BUTTON",L"资源占用",BS_PUSHBUTTON,15,169,110,30,2);Control(settingsWindow,L"BUTTON",L"保存",BS_DEFPUSHBUTTON,510,169,120,30,1);ShowWindow(settingsWindow,SW_RESTORE);SetWindowPos(settingsWindow,HWND_TOP,40,40,660,265,SWP_SHOWWINDOW);SetForegroundWindow(settingsWindow);}
+static void ShowSettings(){if(settingsWindow){ShowWindow(settingsWindow,SW_RESTORE);SetForegroundWindow(settingsWindow);return;}settingsWindow=CreateWindowExW(WS_EX_APPWINDOW,L"Crli.Capture.Settings",L"定时双屏截图 · 设置",WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,660,265,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);CaptureControl(settingsWindow,L"STATIC",L"保存根目录（粘贴完整路径；自动在下面按天建文件夹）",0,15,15,620,22,0);dirEdit=CaptureControl(settingsWindow,L"EDIT",settings.directory.c_str(),WS_BORDER|ES_AUTOHSCROLL,15,43,615,28,10);CaptureControl(settingsWindow,L"STATIC",L"文件名格式：HH-mm 为 24 小时制，例如 16-10.png",0,15,88,615,22,0);formatEdit=CaptureControl(settingsWindow,L"EDIT",settings.format.c_str(),WS_BORDER|ES_AUTOHSCROLL,15,116,615,28,11);CaptureControl(settingsWindow,L"BUTTON",L"资源占用",BS_PUSHBUTTON,15,169,110,30,2);CaptureControl(settingsWindow,L"BUTTON",L"保存",BS_DEFPUSHBUTTON,510,169,120,30,1);ShowWindow(settingsWindow,SW_RESTORE);SetWindowPos(settingsWindow,HWND_TOP,40,40,660,265,SWP_SHOWWINDOW);SetForegroundWindow(settingsWindow);}
 static void Notification(bool add){NOTIFYICONDATAW n={};n.cbSize=sizeof(n);n.hWnd=mainWindow;n.uID=1;n.uFlags=NIF_ICON|NIF_MESSAGE|NIF_TIP;n.uCallbackMessage=NotifyMessage;n.hIcon=LoadIconW(nullptr,IDI_APPLICATION);std::wstring text=L"定时双屏截图";if(paused)text+=L"：已暂停";else{SYSTEMTIME t=FromTicks(nextTime);wchar_t b[40];swprintf_s(b,L"：%02u:%02u",t.wHour,t.wMinute);text+=b;}wcsncpy_s(n.szTip,text.c_str(),_TRUNCATE);Shell_NotifyIconW(add?NIM_ADD:NIM_MODIFY,&n);if(add){n.uVersion=4;Shell_NotifyIconW(NIM_SETVERSION,&n);}}
 static bool StartupEnabled(){HKEY key;bool ok=false;if(RegOpenKeyExW(HKEY_CURRENT_USER,L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",0,KEY_QUERY_VALUE,&key)==ERROR_SUCCESS){ok=RegQueryValueExW(key,L"ScreenCaptureTimer",nullptr,nullptr,nullptr,nullptr)==ERROR_SUCCESS;RegCloseKey(key);}return ok;}
 static void ToggleStartup(){HKEY key;if(RegCreateKeyExW(HKEY_CURRENT_USER,L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",0,nullptr,0,KEY_SET_VALUE,nullptr,&key,nullptr)==ERROR_SUCCESS){if(StartupEnabled())RegDeleteValueW(key,L"ScreenCaptureTimer");else{wchar_t exe[32768];GetModuleFileNameW(nullptr,exe,32768);std::wstring command=L"\""+std::wstring(exe)+L"\"";RegSetValueExW(key,L"ScreenCaptureTimer",0,REG_SZ,(BYTE*)command.c_str(),(command.size()+1)*sizeof(wchar_t));}RegCloseKey(key);}}
@@ -125,8 +129,65 @@ static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM w,LPARAM l){
     if(msg==WM_DESTROY){KillTimer(h,1);WTSUnRegisterSessionNotification(h);NOTIFYICONDATAW n={};n.cbSize=sizeof(n);n.hWnd=h;n.uID=1;Shell_NotifyIconW(NIM_DELETE,&n);if(settingsWindow)DestroyWindow(settingsWindow);if(resourcesWindow)DestroyWindow(resourcesWindow);Log(L"STOP native");PostQuitMessage(0);return 0;}
     return DefWindowProcW(h,msg,w,l);
 }
-#ifndef NATIVE_TEST_BUILD
-int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR command,int){
+
+static const UINT IntegratedTimer=WM_APP+30;
+static const UINT IntegratedDone=WM_APP+31;
+static const UINT CaptureNowCommand=2101,PauseCommand=2102,SettingsCommand=2103,ResourcesCommand=2104,FolderCommand=2105;
+static HINSTANCE hostInstance=nullptr;
+static bool initialized=false;
+
+void Initialize(HWND owner,HINSTANCE instance,const std::wstring& directory) {
+    if(initialized)return;
+    initialized=true;mainWindow=owner;hostInstance=instance;root=directory;configPath=root+L"\\config.json";
+    bool migrate=GetFileAttributesW(configPath.c_str())==INVALID_FILE_ATTRIBUTES;
+    if(migrate){std::wstring legacy=root+L"\\ScreenCaptureTimer\\config.json";if(GetFileAttributesW(legacy.c_str())!=INVALID_FILE_ATTRIBUTES)configPath=legacy;}
+    Load();if(GetFileAttributesW(configPath.c_str())==INVALID_FILE_ATTRIBUTES&&!Save(settings))Log(L"CONFIG ERROR cannot create portable config");
+    if(configPath!=root+L"\\config.json"){configPath=root+L"\\config.json";if(!Save(settings))Log(L"CONFIG ERROR cannot migrate portable config");}
+    LOGFONTW lf={};lf.lfHeight=-14;wcscpy_s(lf.lfFaceName,L"Microsoft YaHei UI");font=CreateFontIndirectW(&lf);
+    struct Registration{const wchar_t* cls;WNDPROC proc;};
+    for(auto reg:{Registration{L"Crli.Capture.Settings",SettingsProc},Registration{L"Crli.Capture.Resources",ResourceProc}}){
+        WNDCLASSW wc={};wc.hInstance=hostInstance;wc.lpszClassName=reg.cls;wc.lpfnWndProc=reg.proc;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);RegisterClassW(&wc);
+    }
+    previousTime=Now();nextTime=Next(previousTime);SetTimer(mainWindow,IntegratedTimer,500,nullptr);
+    Log(L"START integrated capture; fileFormat="+settings.format+L" output="+settings.directory);
+}
+UINT CompletionMessage(){return IntegratedDone;}
+UINT TimerId(){return IntegratedTimer;}
+bool IsBusy(){return busy.load();}
+void OnTimer(){
+    ULONGLONG now=Now();if(now+20000000<previousTime||now>previousTime+100000000)nextTime=Next(now);previousTime=now;
+    if(now>=nextTime){nextTime=Next(now);if(!paused&&!locked)QueueCapture();}
+}
+void OnSessionChange(WPARAM event){if(event==WTS_SESSION_LOCK)locked=true;else if(event==WTS_SESSION_UNLOCK){locked=false;nextTime=Next(Now());}}
+void OnCompletion(){Log(L"CAPTURE memory sampledPrivateWorkingSetPeak="+std::to_wstring(capturePeak.load()));}
+void ShowCaptureSettings(){ShowSettings();}
+void AddMenu(HMENU parent){
+    HMENU submenu=CreatePopupMenu();SYSTEMTIME t=FromTicks(nextTime);wchar_t status[80];
+    swprintf_s(status,L"下次截图：%02u:%02u（每 10 分钟）",t.wHour,t.wMinute);
+    AppendMenuW(submenu,MF_STRING|MF_DISABLED,0,status);AppendMenuW(submenu,MF_SEPARATOR,0,nullptr);
+    AppendMenuW(submenu,MF_STRING,CaptureNowCommand,L"立即截图");
+    AppendMenuW(submenu,MF_STRING|(paused?MF_CHECKED:0),PauseCommand,L"暂停定时截图");
+    AppendMenuW(submenu,MF_STRING,SettingsCommand,L"设置保存目录和文件名…");
+    AppendMenuW(submenu,MF_STRING,ResourcesCommand,L"截图资源占用");
+    AppendMenuW(submenu,MF_STRING,FolderCommand,L"打开截图目录");
+    AppendMenuW(parent,MF_POPUP,(UINT_PTR)submenu,L"定时截图");
+}
+bool HandleMenu(UINT command){
+    if(command==CaptureNowCommand)QueueCapture();
+    else if(command==PauseCommand){paused=!paused;nextTime=Next(Now());}
+    else if(command==SettingsCommand)ShowSettings();
+    else if(command==ResourcesCommand)ShowResources();
+    else if(command==FolderCommand)OpenFolder();
+    else return false;
+    return true;
+}
+void Shutdown(){
+    KillTimer(mainWindow,IntegratedTimer);if(settingsWindow)DestroyWindow(settingsWindow);if(resourcesWindow)DestroyWindow(resourcesWindow);
+    if(font){DeleteObject(font);font=nullptr;}initialized=false;
+}
+
+#if !defined(NATIVE_TEST_BUILD) && !defined(SCREEN_CAPTURE_EMBEDDED)
+int RunStandalone(HINSTANCE instance,LPWSTR command){
     wchar_t exe[32768];GetModuleFileNameW(nullptr,exe,32768);root=exe;root.resize(root.find_last_of(L'\\'));configPath=root+L"\\config.json";std::wstring args=Trim(command?command:L"");SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);Load();
     if(GetFileAttributesW(configPath.c_str())==INVALID_FILE_ATTRIBUTES&&!Save(settings))Log(L"CONFIG ERROR cannot create portable config");
     HWND existing=FindWindowW(AppClass,nullptr);
@@ -140,4 +201,10 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR command,int){
     MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){if(settingsWindow&&IsDialogMessageW(settingsWindow,&msg))continue;TranslateMessage(&msg);DispatchMessageW(&msg);}DeleteObject(font);ReleaseMutex(mutex);CloseHandle(mutex);return 0;
 }
 
+#endif
+
+}
+
+#if !defined(NATIVE_TEST_BUILD) && !defined(SCREEN_CAPTURE_EMBEDDED)
+int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR command,int){return CaptureTimer::RunStandalone(instance,command);}
 #endif

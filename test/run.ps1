@@ -1,14 +1,18 @@
 $ErrorActionPreference = 'Stop'
+$mingwBin = 'C:\Environment\msys64\mingw64\bin'
+if (-not (Test-Path (Join-Path $mingwBin 'g++.exe'))) {
+    $mingwBin = Split-Path -Parent (Get-Command g++.exe -ErrorAction Stop).Source
+}
 $projectRoot = Split-Path -Parent $PSScriptRoot
 $buildOutput = Join-Path $PSScriptRoot 'build'
 New-Item -ItemType Directory -Path $buildOutput -Force | Out-Null
 $resourceObject = Join-Path $buildOutput 'TrayGroups.resources.o'
 Push-Location $projectRoot
 try {
-    & 'C:\Environment\msys64\mingw64\bin\windres.exe' -i TrayGroups.rc -o $resourceObject
+    & (Join-Path $mingwBin 'windres.exe') -i TrayGroups.rc -o $resourceObject
     if ($LASTEXITCODE -ne 0) { throw 'Icon resource build failed.' }
 } finally { Pop-Location }
-& 'C:\Environment\msys64\mingw64\bin\g++.exe' -std=c++17 -Os -s -static -fno-exceptions -fno-rtti -municode -mwindows '-Wl,--nxcompat,--dynamicbase' -o "$PSScriptRoot\TrayGroups.tests.exe" "$PSScriptRoot\TrayGroups.tests.cpp" $resourceObject -lcomctl32 -lshell32 -luser32 -lgdi32 -lpsapi -luxtheme
+& (Join-Path $mingwBin 'g++.exe') -std=c++17 -Os -s -static -fno-exceptions -fno-rtti -municode -mwindows '-Wl,--nxcompat,--dynamicbase' -o "$PSScriptRoot\TrayGroups.tests.exe" "$PSScriptRoot\TrayGroups.tests.cpp" $resourceObject -lcomctl32 -lshell32 -luser32 -lgdi32 -lpsapi -luxtheme -lz -lwtsapi32 -ladvapi32
 if ($LASTEXITCODE -ne 0) { throw 'Test build failed.' }
 $testProcess = Start-Process -FilePath "$PSScriptRoot\TrayGroups.tests.exe" -WindowStyle Hidden -PassThru
 if (-not $testProcess.WaitForExit(25000)) { throw 'Test timeout.' }

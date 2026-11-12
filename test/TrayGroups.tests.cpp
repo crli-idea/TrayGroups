@@ -130,6 +130,8 @@ static int SelfTest() {
 
 static bool IdentityRegression(std::wstring& report) {
     bool ok=true;auto check=[&](bool result,const wchar_t* name){report+=(result?L"PASS: ":L"FAIL: ")+std::wstring(name)+L"\n";if(!result)ok=false;};
+    HMENU captureMenu=CreatePopupMenu();CaptureTimer::AddMenu(captureMenu);
+    check(GetMenuItemCount(captureMenu)==1&&GetMenuItemCount(GetSubMenu(captureMenu,0))==7,L"scheduled capture is available as a submenu without another tray entry");DestroyMenu(captureMenu);
     auto previousConfig=configPath;configPath=baseDir+L"\\default-identity.ini";DeleteFileW(configPath.c_str());LoadSettings();
     check(iconMatch==L"path-class-id",L"new configuration defaults to full-path, stable-window-class, and icon-ID identity");
     configPath=previousConfig;iconMatch=L"path-class-id";

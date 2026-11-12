@@ -8,6 +8,7 @@
 #include <windowsx.h>
 #include <commctrl.h>
 #include <shellapi.h>
+#include <wtsapi32.h>
 #include <psapi.h>
 #include <tlhelp32.h>
 #include <algorithm>
@@ -41,6 +42,7 @@ static bool groupEditing=false, fillingSettings=false;
 static HFONT appFont=nullptr;
 static std::wstring baseDir, configPath, recoveryPath;
 static bool foldIcons=true, shuttingDown=false, refreshing=false;
+static bool stopAfterCapture=false;
 static UINT taskbarCreated;
 static std::wstring activeGroup;
 static int pendingClick=-1, reFoldAttempts=0;
@@ -791,6 +793,9 @@ static HWND Control(HWND parent,const wchar_t* cls,const wchar_t* text,DWORD sty
 
 #include "TraySettings.h"
 
+#define SCREEN_CAPTURE_EMBEDDED
+#include "ScreenCaptureTimer/ScreenCaptureTimer.cpp"
+
 static LRESULT CALLBACK ResourceProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
     if(msg==WM_TIMER){SetWindowTextW(resourceText,ResourceReport().c_str());return 0;}
     if(msg==WM_DESTROY){KillTimer(h,ResourceTimer);resourceWindow=nullptr;return 0;}
@@ -802,23 +807,27 @@ static void ShowResources() {
     resourceText=Control(resourceWindow,L"STATIC",ResourceReport().c_str(),0,18,16,495,350,0);SetTimer(resourceWindow,ResourceTimer,1000,nullptr);ShowWindow(resourceWindow,SW_SHOW);SetForegroundWindow(resourceWindow);
 }
 static void RootMenu() {
-    ClosePopup();HMENU menu=CreatePopupMenu();AppendMenuW(menu,MF_STRING,1,L"设置分组…");AppendMenuW(menu,MF_STRING,2,L"资源占用");AppendMenuW(menu,MF_STRING,4,L"重新加载配置并刷新");AppendMenuW(menu,MF_STRING,7,L"编辑 groups.ini 配置文件");AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING,5,L"恢复全部原图标并暂停折叠");AppendMenuW(menu,MF_STRING,6,L"退出（恢复原图标）");POINT pt;GetCursorPos(&pt);SetForegroundWindow(mainWindow);int id=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,pt.x,pt.y,0,mainWindow,nullptr);DestroyMenu(menu);PostMessageW(mainWindow,WM_NULL,0,0);
+    ClosePopup();HMENU menu=CreatePopupMenu();AppendMenuW(menu,MF_STRING,1,L"设置分组…");AppendMenuW(menu,MF_STRING,2,L"资源占用");CaptureTimer::AddMenu(menu);AppendMenuW(menu,MF_STRING,4,L"重新加载配置并刷新");AppendMenuW(menu,MF_STRING,7,L"编辑 groups.ini 配置文件");AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING,5,L"恢复全部原图标并暂停折叠");AppendMenuW(menu,MF_STRING,6,L"退出（恢复原图标）");POINT pt;GetCursorPos(&pt);SetForegroundWindow(mainWindow);int id=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,pt.x,pt.y,0,mainWindow,nullptr);DestroyMenu(menu);PostMessageW(mainWindow,WM_NULL,0,0);
+    if(CaptureTimer::HandleMenu(id))return;
     if(id==1)ShowSettings();else if(id==2)ShowResources();else if(id==4){RestoreHidden();LoadSettings();Refresh();if(settingsWindow)FillSettings();}else if(id==5){foldIcons=false;SaveSettings();RestoreHidden();Refresh();}else if(id==6)PostMessageW(mainWindow,StopApp,0,0);else if(id==7){std::wstring cmd=L"notepad.exe \""+configPath+L"\"";STARTUPINFOW si={};si.cb=sizeof(si);PROCESS_INFORMATION pi={};if(CreateProcessW(nullptr,&cmd[0],nullptr,nullptr,FALSE,0,nullptr,nullptr,&si,&pi)){CloseHandle(pi.hThread);CloseHandle(pi.hProcess);}}
 }
 static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
     if(msg==TrayCallback){UINT id=HIWORD(l),event=LOWORD(l);if(!notificationGroups.count(id))return 0;if(event==WM_CONTEXTMENU)PostMessageW(h,WM_APP+8,2,0);else if(event==NIN_SELECT||event==NIN_KEYSELECT)PostMessageW(h,WM_APP+8,1,id);return 0;}
     if(msg==WM_APP+8){if(w==2)RootMenu();else if(l==1){if(popupWindow)ClosePopup();else{popupPage=0;ShowGroups();}}return 0;}
     if(msg==WM_TIMER&&w==RefreshTimer){if(!popupWindow&&!settingsWindow)Refresh();return 0;}
+    if(msg==WM_TIMER&&w==CaptureTimer::TimerId()){CaptureTimer::OnTimer();return 0;}
     if(msg==WM_TIMER&&w==ReFoldTimer){
         if(!popupWindow&&!settingsWindow)Refresh();
         if(--reFoldAttempts<=0)KillTimer(h,ReFoldTimer);return 0;
     }
-    if(msg==StopApp){RestoreHidden();if(hidden.empty())DestroyWindow(h);else{foldIcons=false;LogError(L"退出已暂停：请先恢复剩余图标");}return 0;}
+    if(msg==StopApp){RestoreHidden();if(CaptureTimer::IsBusy()){stopAfterCapture=true;return 0;}if(hidden.empty())DestroyWindow(h);else{foldIcons=false;LogError(L"退出已暂停：请先恢复剩余图标");}return 0;}
     if(msg==RefreshApp){RestoreHidden();LoadSettings();Refresh();if(settingsWindow)FillSettings();return 0;}
     if(msg==WM_COMMAND&&LOWORD(w)==1){ShowSettings();return 0;}
-    if(msg==WM_QUERYENDSESSION){RestoreHidden();return TRUE;}
+    if(msg==WM_WTSSESSION_CHANGE){CaptureTimer::OnSessionChange(w);return 0;}
+    if(msg==WM_QUERYENDSESSION){if(CaptureTimer::IsBusy())return FALSE;RestoreHidden();return TRUE;}
     if(msg==taskbarCreated){hidden.clear();notificationGroups.clear();notificationCount=0;for(auto& p:notificationIcons)DestroyIcon(p.second);notificationIcons.clear();SetTimer(h,RefreshTimer,30000,nullptr);Refresh();return 0;}
-    if(msg==WM_DESTROY){shuttingDown=true;KillTimer(h,RefreshTimer);KillTimer(h,ReFoldTimer);ClosePopup();if(settingsWindow)DestroyWindow(settingsWindow);if(resourceWindow)DestroyWindow(resourceWindow);RestoreHidden();DeleteNotifications();FreeItems(items);PostQuitMessage(0);return 0;}
+    if(msg==WM_DESTROY){shuttingDown=true;KillTimer(h,RefreshTimer);KillTimer(h,ReFoldTimer);ClosePopup();if(settingsWindow)DestroyWindow(settingsWindow);if(resourceWindow)DestroyWindow(resourceWindow);CaptureTimer::Shutdown();WTSUnRegisterSessionNotification(h);RestoreHidden();DeleteNotifications();FreeItems(items);PostQuitMessage(0);return 0;}
+    if(msg==CaptureTimer::CompletionMessage()){CaptureTimer::OnCompletion();if(stopAfterCapture)PostMessageW(h,StopApp,0,0);return 0;}
     return DefWindowProcW(h,msg,w,l);
 }
 
@@ -839,7 +848,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR cmd,int) {
     struct Registration{const wchar_t* name;WNDPROC proc;UINT style;};Registration classes[]={{AppClass,MainProc,0},{PopupClass,PopupProc,CS_DBLCLKS},{L"Crli.TrayGroups.Resources",ResourceProc,0}};
     for(auto c:classes){WNDCLASSW wc={};wc.lpfnWndProc=c.proc;wc.hInstance=instance;wc.lpszClassName=c.name;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);wc.style=c.style;wc.hIcon=appIcon;RegisterClassW(&wc);}
     taskbarCreated=RegisterWindowMessageW(L"TaskbarCreated");LoadSettings();if(GetFileAttributesW(configPath.c_str())==INVALID_FILE_ATTRIBUTES)SaveSettings();RecoverIcons();mainWindow=CreateWindowExW(WS_EX_TOOLWINDOW,AppClass,L"TrayGroups 托盘分组器",WS_POPUP,0,0,0,0,nullptr,nullptr,instance,nullptr);
-    if(!mainWindow){CloseHandle(mutex);return 1;}ShowWindow(mainWindow,SW_HIDE);Refresh();SetTimer(mainWindow,RefreshTimer,30000,nullptr);if(args!=L"--background")ShowSettings();
+    if(!mainWindow){CloseHandle(mutex);return 1;}ShowWindow(mainWindow,SW_HIDE);CaptureTimer::Initialize(mainWindow,instance,baseDir);WTSRegisterSessionNotification(mainWindow,NOTIFY_FOR_THIS_SESSION);Refresh();SetTimer(mainWindow,RefreshTimer,30000,nullptr);if(args!=L"--background")ShowSettings();
     MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){if(settingsWindow&&IsDialogMessageW(settingsWindow,&msg))continue;TranslateMessage(&msg);DispatchMessageW(&msg);}
     if(appFont)DeleteObject(appFont);if(appIcon)DestroyIcon(appIcon);ReleaseMutex(mutex);CloseHandle(mutex);return 0;
 }
