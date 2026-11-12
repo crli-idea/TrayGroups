@@ -111,3 +111,5 @@ Windows 托盘隐藏/恢复接口对部分系统图标需要真实 GUID；这是
 `ScreenCaptureTimer/` 提供独立的原生 C++ 定时截图程序，与 TrayGroups 共用此仓库但分别运行，互不阻塞。每逢 10 分钟整点将所有显示器按物理布局合成一张 PNG，按日期建目录保存；文件名格式和保存位置可配置。支持立即截图、暂停、查看资源占用和打开保存目录。截图只写入本地，不上传、不自动删除。独立进程保留各自托盘图标及原有设置。两个程序均采用便携模式：`groups.ini`、`restore-icons.tsv`、`config.json`、日志及默认 `Captures` 目录位于对应 exe 旁；请放在可写目录中运行。
 
 运行 `build.ps1` 构建两个程序。截图功能和参数见 [ScreenCaptureTimer/README.md](ScreenCaptureTimer/README.md)。运行 `test/run-all.ps1` 执行两套测试。
+
+推送 `v*` 标签会通过 GitHub Actions 构建 Windows 便携包并创建 Release。Release 需要仓库允许 Actions 的 `GITHUB_TOKEN` 写入内容。

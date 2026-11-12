@@ -1,0 +1,55 @@
+name: Windows Release
+
+on:
+  push:
+    branches:
+      - main
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    if: >-
+      github.ref_type == 'tag' ||
+      (github.ref == 'refs/heads/main' &&
+       github.event.head_commit.message == 'Add automatic GitHub release workflow')
+    runs-on: windows-latest
+    env:
+      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'v1.0.0' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: mingw-w64-x86_64-gcc mingw-w64-x86_64-zlib
+
+      - name: Build both programs
+        shell: pwsh
+        run: .\build.ps1
+
+      - name: Package portable binaries
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:RUNNER_TEMP 'traygroups-release'
+          New-Item -ItemType Directory -Path $stage -Force | Out-Null
+          Copy-Item test\build\TrayGroups.exe, ScreenCaptureTimer\test\build\ScreenCaptureTimer.exe, README.md -Destination $stage
+          Copy-Item ScreenCaptureTimer\README.md (Join-Path $stage 'ScreenCaptureTimer-README.md')
+          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath "test\build\TrayGroups-$env:RELEASE_TAG-windows-x64.zip" -Force
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ env.RELEASE_TAG }}
+          name: TrayGroups ${{ env.RELEASE_TAG }}
+          body: |
+            Portable Windows release containing TrayGroups and ScreenCaptureTimer.
+
+            Both programs keep configuration beside their executable. Extract them to a writable folder before running.
+          files: test/build/TrayGroups-${{ env.RELEASE_TAG }}-windows-x64.zip
+          fail_on_unmatched_files: true
+          make_latest: true
