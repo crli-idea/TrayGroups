@@ -36,3 +36,4 @@ test/explorer-identities.tsv
 test/identity-self-test.txt
 test/guid-identity.ini
 test/guid-test-restore.tsv
+/TrayGroups-*-windows-x64.zip

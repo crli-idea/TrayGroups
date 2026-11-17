@@ -15,3 +15,5 @@
 `recovery-lifecycle.ps1` 仅操作测试自己注册的图标，在 `build/recovery-lifecycle/portable` 中运行正式 EXE。检查 INI 写入失败、内存记录丢失、原先隐藏状态、进程身份过期、正常退出、单独强制终止主程序后的看护恢复、升级替换和独立 `--restore`。结束时核对其他图标的隐藏状态没有变化。报告位于 `build/recovery-lifecycle/report.txt`。这些检查不模拟真实断电。
 
 `recovery-diagnostics.cpp` 是只读托盘快照工具，输出同目录下的 `recovery-diagnostics.txt`；不会隐藏、恢复或点击图标。
+
+发布 ZIP 直接输出项目根目录，便于本地自测；编译中间文件继续保存在 test/build/。

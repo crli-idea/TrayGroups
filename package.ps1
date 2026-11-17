@@ -7,7 +7,8 @@ $readme = Join-Path $PSScriptRoot 'README.md'
 if ($Version -ne 'main' -and ('v' + (Get-Item -LiteralPath $binary).VersionInfo.FileVersion) -ne $Version) {
     throw 'Release tag and executable version do not match.'
 }
-$archive = Join-Path $PSScriptRoot "test\build\TrayGroups-$Version-windows-x64.zip"
+$archiveName = "TrayGroups-$Version-windows-x64.zip"
+$archive = Join-Path $PSScriptRoot $archiveName
 # Explicit files prevent local settings, screenshots or stale staging files leaking.
 Compress-Archive -LiteralPath $binary,$ini,$readme -DestinationPath $archive -Force
 Add-Type -AssemblyName System.IO.Compression.FileSystem
@@ -18,4 +19,4 @@ try {
     if (@(Compare-Object $expected $names).Count) { throw 'Portable package contents are incorrect.' }
     if (@($zip.Entries | Where-Object { $_.Length -eq 0 }).Count) { throw 'Portable package contains an empty file.' }
 } finally { $zip.Dispose() }
-Write-Output "Verified portable package: $archive (EXE, default INI, README)"
+Write-Output "Verified portable package: .\$archiveName (EXE, default INI, README)"
