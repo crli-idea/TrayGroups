@@ -151,6 +151,8 @@ Top=100
 
 发布约定：每次完成 bug 修复或新增功能，都必须递增版本号、验证后提交，并为该提交创建及推送 `v版本号` 标签，触发自动构建和 Release。bug 修复递增补丁版本（例如 `v1.1.2`），新增功能递增次版本（例如 `v1.2.0`）；修改 `src/app/AppVersion.h` 中的数字与文本版本即可同步 EXE 资源、启动日志和托盘提示。标签发布后不覆盖或复用，后续修复使用新版本。仅推送 `main` 不算完成上述发布流程。
 
+每次版本发布前，必须在本地 Windows 上以发布模式运行 `build.ps1`，再运行 `package.ps1 -Version v版本号`，生成 `test/build/TrayGroups-v版本号-windows-x64.zip`，方便本地自测。ZIP 必须包含对应版本的 `TrayGroups.exe`、默认 `groups.ini` 和 README；生成后校验包内容与 EXE 版本，并在发布说明中给出本地 ZIP 路径。更新版本号或包内文件后，重新生成本地 ZIP。
+
 例如本次版本：提交后执行 `git tag -a v1.2.0 -m "TrayGroups v1.2.0"`，再执行 `git push origin main v1.2.0`，最后确认 Actions 成功且 Release 的便携包可下载。
 
 ## 本地调试日志
