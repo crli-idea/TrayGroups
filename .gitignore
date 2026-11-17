@@ -1,4 +1,9 @@
 groups.ini
+config.json
+Captures/
+activity.log
+last-capture.json
+TrayGroups.debug.log*
 restore-icons.tsv
 ScreenCaptureTimer/config.json
 ScreenCaptureTimer/Captures/

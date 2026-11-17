@@ -3,6 +3,7 @@ $projectRoot = Split-Path -Parent $PSScriptRoot
 $failures = [System.Collections.Generic.List[string]]::new()
 
 foreach ($script in @(
+    (Join-Path $PSScriptRoot 'capture-integration.ps1'),
     (Join-Path $PSScriptRoot 'run.ps1'),
     (Join-Path $projectRoot 'ScreenCaptureTimer\test\run.ps1')
 )) {

@@ -18,6 +18,9 @@
 #include <vector>
 #include <cstdint>
 #include "NativeResources.h"
+#include "DebugLog.h"
+#define SCREEN_CAPTURE_EMBEDDED
+#include "ScreenCaptureTimer/ScreenCaptureTimer.cpp"
 
 static const wchar_t* AppClass=L"Crli.TrayGroups.Native";
 static const wchar_t* PopupClass=L"Crli.TrayGroups.Popup";
@@ -101,7 +104,7 @@ static std::wstring ReadText(const std::wstring& path) {
     if(h==INVALID_HANDLE_VALUE)return L"";DWORD n=GetFileSize(h,nullptr);if(n>1024*1024){CloseHandle(h);return L"";}std::string b(n,0);DWORD got=0;ReadFile(h,b.empty()?nullptr:&b[0],n,&got,nullptr);CloseHandle(h);b.resize(got);return Wide(b);
 }
 static std::wstring Escape(std::wstring s) { for(auto& c:s)if(c==L'\t'||c==L'\r'||c==L'\n')c=L' ';return s; }
-static void LogError(const std::wstring& s) { latestError=s;OutputDebugStringW((L"TrayGroups: "+s+L"\n").c_str()); }
+static void LogError(const std::wstring& s) { latestError=s;DebugLog::Write(L"ERROR "+s);OutputDebugStringW((L"TrayGroups: "+s+L"\n").c_str()); }
 
 static int LabelSize(int value) { return std::max(8,std::min(32,value)); }
 static int GroupLabelSize(const std::wstring& name) { auto i=groupLabelSizes.find(name);return i==groupLabelSizes.end()?defaultLabelSize:i->second; }
@@ -110,7 +113,7 @@ static int GroupLabelHeight(const std::wstring& group) { auto i=groupLabelHeight
 static bool ValidMatch(const std::wstring& value) { return value==L"path-guid"||value==L"path-class-id"||value==L"path-id"||value==L"path-class-tip"; }
 static void LoadSettings() {
     assignments.clear();programAssignments.clear();pathAssignments.clear();groupLabelSizes.clear();groupLabelWidths.clear();groupLabelHeights.clear();
-    iconMatch=L"path-class-id";defaultLabelSize=12;foldIcons=true;haveSettingsPosition=false;
+    iconMatch=L"path-class-id";defaultLabelSize=12;foldIcons=true;haveSettingsPosition=false;DebugLog::enabled=true;
     std::wstring text=ReadText(configPath),section;size_t start=0;bool hasX=false,hasY=false;
     if(!text.empty()&&text[0]==0xfeff)text.erase(0,1);
     while(start<text.size()){
@@ -122,6 +125,7 @@ static void LoadSettings() {
         std::wstring key=Trim(line.substr(0,pos)),val=Trim(line.substr(pos+1)),low=Lower(key);
         if(section==L"settings"){
             if(low==L"foldoriginalicons")foldIcons=val==L"1";
+            else if(low==L"debuglogging")DebugLog::enabled=val==L"1";
             else if(low==L"iconmatch"&&ValidMatch(val))iconMatch=val;
             else if(low==L"defaultgrouplabelsize")defaultLabelSize=LabelSize(_wtoi(val.c_str()));
         }else if(section==L"programs")programAssignments[low]=val;
@@ -144,7 +148,7 @@ static bool AtomicConfig(const std::wstring& text) {
 }
 static bool SaveSettings() {
     std::wstring text=L"; TrayGroups UTF-8. Right-click T -> Reload configuration after manual edits.\n[Settings]\nFoldOriginalIcons="+std::wstring(foldIcons?L"1":L"0")+L"\n"
-        L"; Per-icon identity modes: path-class-id (default), path-guid, path-id, path-class-tip.\nIconMatch="+iconMatch+
+        L"DebugLogging="+std::wstring(DebugLog::enabled.load()?L"1":L"0")+L"\n; Per-icon identity modes: path-class-id (default), path-guid, path-id, path-class-tip.\nIconMatch="+iconMatch+
         L"\nDefaultGroupLabelSize="+std::to_wstring(defaultLabelSize)+L"\n\n[Programs]\n; Executable filename: all matching icons (explicit broad rules).\n";
     for(const auto& i:programAssignments)text+=Escape(i.first)+L"="+Escape(i.second)+L"\n";
     text+=L"\n[Paths]\n; Full executable path: all icons belonging to this exact path.\n";
@@ -523,8 +527,10 @@ static void DeleteNotifications() {
 }
 static void AddNotification(UINT id,const std::wstring& group,HICON icon) {
     NOTIFYICONDATAW n={};n.cbSize=sizeof(n);n.hWnd=mainWindow;n.uID=id;n.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;n.uCallbackMessage=TrayCallback;n.hIcon=icon;
-    std::wstring tip=id==1?L"TrayGroups 托盘分组器":group;wcsncpy_s(n.szTip,tip.c_str(),_TRUNCATE);
-    if(Shell_NotifyIconW(NIM_ADD,&n)){n.uVersion=NOTIFYICON_VERSION_4;Shell_NotifyIconW(NIM_SETVERSION,&n);notificationIcons[id]=icon;notificationGroups[id]=group;notificationCount++;}else DestroyIcon(icon);
+    std::wstring tip=id==1?L"TrayGroups 1.1.1 · 左键分组和截图，右键菜单":group;wcsncpy_s(n.szTip,tip.c_str(),_TRUNCATE);
+    BOOL registered=Shell_NotifyIconW(NIM_ADD,&n);
+    if(!registered){DWORD error=GetLastError();registered=Shell_NotifyIconW(NIM_MODIFY,&n);DebugLog::Write(L"TRAY add failed win32="+Number(error)+L" modify-existing="+Number(registered));}
+    if(registered){n.uVersion=NOTIFYICON_VERSION_4;BOOL versioned=Shell_NotifyIconW(NIM_SETVERSION,&n);DebugLog::Write(L"TRAY registered id="+Number(id)+L" version4="+Number(versioned));notificationIcons[id]=icon;notificationGroups[id]=group;notificationCount++;}else{LogError(L"添加 T 图标失败，Win32="+Number(GetLastError()));DestroyIcon(icon);}
 }
 
 static std::set<std::wstring> GroupNames() {
@@ -606,6 +612,8 @@ static void PerformTile(int tile,int action) {
 }
 static HFONT LabelFont(int points,int dpi) { return CreateFontW(-MulDiv(points,dpi,72),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI"); }
 static bool preservePopupPosition=false;
+static const UINT CaptureStatusControl=2200,PopupStatusTimer=2201;
+static const int CaptureFooterHeight=62;
 static POINT popupOrigin={};
 static RECT CursorWorkArea() {
     POINT cursor;if(preservePopupPosition)cursor=popupOrigin;else GetCursorPos(&cursor);MONITORINFO info={};info.cbSize=sizeof(info);
@@ -711,16 +719,40 @@ static LRESULT CALLBACK PopupProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
     }
     case WM_LBUTTONDBLCLK:{KillTimer(h,SingleTimer);pendingClick=-1;POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};PerformTile(TileAt(pt),1);return 0;}
     case WM_RBUTTONUP:{POINT pt={GET_X_LPARAM(l),GET_Y_LPARAM(l)};KillTimer(h,SingleTimer);PerformTile(TileAt(pt),2);return 0;}
-    case WM_TIMER:if(w==SingleTimer){KillTimer(h,SingleTimer);PerformTile(pendingClick,0);pendingClick=-1;}return 0;
+    case WM_TIMER:
+        if(w==SingleTimer){KillTimer(h,SingleTimer);PerformTile(pendingClick,0);pendingClick=-1;}
+        else if(w==PopupStatusTimer)SetDlgItemTextW(h,CaptureStatusControl,CaptureTimer::StatusText().c_str());
+        return 0;
+    case WM_COMMAND:{
+        UINT command=LOWORD(w);
+        if(command==CaptureTimer::CaptureNowCommand||command==CaptureTimer::SettingsCommand){
+            DebugLog::Write(L"POPUP capture button="+Number(command));ClosePopup();PostMessageW(mainWindow,WM_COMMAND,command,0);
+        }
+        return 0;
+    }
     case WM_KEYDOWN:if(w==VK_ESCAPE)DestroyWindow(h);return 0;
     case WM_ACTIVATE:if(LOWORD(w)==WA_INACTIVE)PostMessageW(h,WM_CLOSE,0,0);return 0;
-    case WM_DESTROY:popupWindow=nullptr;pendingClick=-1;return 0;
+    case WM_DESTROY:DebugLog::Write(L"POPUP destroyed");popupWindow=nullptr;pendingClick=-1;return 0;
     }
     return DefWindowProcW(h,msg,w,l);
 }
 static HWND NewPopup() {
     RECT work=CursorWorkArea();
     return CreateWindowExW(WS_EX_TOOLWINDOW|WS_EX_TOPMOST,PopupClass,L"托盘分组",WS_POPUP|WS_BORDER,work.left+8,work.top+8,420,100,mainWindow,nullptr,GetModuleHandleW(nullptr),nullptr);
+}
+static void AttachCaptureControls(int top){
+    struct Entry{const wchar_t* cls;const wchar_t* text;int y,width,id;};
+    std::wstring status=CaptureTimer::StatusText();
+    Entry controls[]={{L"STATIC",status.c_str(),top,popupWidth-24,(int)CaptureStatusControl},
+        {L"BUTTON",L"立即截图",top+25,100,(int)CaptureTimer::CaptureNowCommand},
+        {L"BUTTON",L"截图设置…",top+25,100,(int)CaptureTimer::SettingsCommand}};
+    for(int n=0;n<3;n++){
+        const auto& c=controls[n];int x=n==2?124:12;
+        HWND control=CreateWindowExW(0,c.cls,c.text,WS_CHILD|WS_VISIBLE|(n?WS_TABSTOP|BS_PUSHBUTTON:SS_ENDELLIPSIS),x,c.y,c.width,24,popupWindow,(HMENU)(INT_PTR)c.id,GetModuleHandleW(nullptr),nullptr);
+        if(control)SendMessageW(control,WM_SETFONT,(WPARAM)appFont,TRUE);else LogError(L"创建截图控件失败，Win32="+Number(GetLastError()));
+    }
+    SetTimer(popupWindow,PopupStatusTimer,1000,nullptr);
+    DebugLog::Write(L"POPUP capture controls attached; "+status);
 }
 static void FillPopupItems(const std::wstring& group) {
     std::vector<int> matching;
@@ -747,16 +779,17 @@ static void AttachPopupTooltips() {
     }
 }
 static void ShowGroups() {
+    DebugLog::Write(L"POPUP ShowGroups begin");
     ClosePopup();Refresh();showingGroups=true;auto groups=GroupNames();popupGroups.assign(groups.begin(),groups.end());
     if(std::find(popupGroups.begin(),popupGroups.end(),activeGroup)==popupGroups.end()){
         activeGroup=popupGroups.empty()?L"":popupGroups.front();
         for(const auto& item:items)if(PopupEligible(item)){activeGroup=item.group;break;}
     }
-    popupWindow=NewPopup();if(!popupWindow)return;
+    popupWindow=NewPopup();if(!popupWindow){LogError(L"无法打开 T 面板，Win32="+Number(GetLastError()));return;}
     RECT work=CursorWorkArea();int dpi=GetDpiForWindow(popupWindow);
     int maximumHeight=0;
     for(const auto& group:popupGroups)maximumHeight=std::max(maximumHeight,std::max(MulDiv(GroupLabelSize(group),dpi,72)+24,MulDiv(GroupLabelHeight(group),dpi,96))+6);
-    popupPageSize=std::max(1,std::min(8,((int)(work.bottom-work.top)-250)/std::max(1,maximumHeight)));
+    popupPageSize=std::max(1,std::min(8,((int)(work.bottom-work.top)-250-CaptureFooterHeight)/std::max(1,maximumHeight)));
     popupPage=std::max(0,std::min(popupPage,((int)popupGroups.size()-1)/popupPageSize));
     groupRects.clear();int top=40;popupWidth=420;
     for(size_t n=popupPage*popupPageSize;n<popupGroups.size()&&groupRects.size()<(size_t)popupPageSize;n++){
@@ -765,16 +798,17 @@ static void ShowGroups() {
         groupRects.push_back(RECT{12,top,12+width,top+height});top+=height+6;popupWidth=std::max(popupWidth,width+24);
     }
     popupItemTop=PopupFooter()+(popupGroups.size()>(size_t)popupPageSize?58:34);
-    popupItemPageSize=4*std::max(1,std::min(4,((int)(work.bottom-work.top)-popupItemTop-140)/72));
+    popupItemPageSize=4*std::max(1,std::min(4,((int)(work.bottom-work.top)-popupItemTop-140-CaptureFooterHeight)/72));
     FillPopupItems(activeGroup);
     int height=popupItemTop+std::max(1,((int)popupItems.size()+3)/4)*72+(popupItemPages>1?34:12);
-    PlacePopup(popupWidth,height);AttachPopupTooltips();SetForegroundWindow(popupWindow);
+    PlacePopup(popupWidth,height+CaptureFooterHeight);AttachPopupTooltips();AttachCaptureControls(height);SetForegroundWindow(popupWindow);
+    DebugLog::Write(L"POPUP visible="+Number(IsWindowVisible(popupWindow))+L" groups="+Number(popupGroups.size())+L" icons="+Number(popupItems.size()));
 }
 static void ShowGroup(const std::wstring& group) {
     if(group.empty()){ShowGroups();return;}
     ClosePopup();Refresh();showingGroups=false;popupWidth=420;popupItemTop=40;activeGroup=group;std::vector<int> all;
     for(size_t n=0;n<items.size();n++)if(items[n].group==group&&PopupEligible(items[n]))all.push_back((int)n);
-    RECT work=CursorWorkArea();int pageSize=4*std::max(1,std::min(4,((int)(work.bottom-work.top)-110)/72));
+    RECT work=CursorWorkArea();int pageSize=4*std::max(1,std::min(4,((int)(work.bottom-work.top)-110-CaptureFooterHeight)/72));
     popupPage=std::max(0,std::min(popupPage,all.empty()?0:((int)all.size()-1)/pageSize));
     auto first=all.begin()+std::min((int)all.size(),popupPage*pageSize);
     popupItems.assign(first,first+std::min(pageSize,(int)(all.end()-first)));
@@ -782,7 +816,7 @@ static void ShowGroup(const std::wstring& group) {
         HICON extracted=nullptr;if(ExtractIconExW(i.path.c_str(),0,nullptr,&extracted,1)&&extracted){DestroyIcon(i.image);i.image=extracted;i.fallbackImage=false;}
     }}
     popupWindow=NewPopup();if(!popupWindow)return;
-    PlacePopup(420,std::max(110,PopupFooter()+34));
+    int height=std::max(110,PopupFooter()+34);PlacePopup(420,height+CaptureFooterHeight);AttachCaptureControls(height);
     AttachPopupTooltips();
     SetForegroundWindow(popupWindow);
 }
@@ -792,9 +826,6 @@ static HWND Control(HWND parent,const wchar_t* cls,const wchar_t* text,DWORD sty
 }
 
 #include "TraySettings.h"
-
-#define SCREEN_CAPTURE_EMBEDDED
-#include "ScreenCaptureTimer/ScreenCaptureTimer.cpp"
 
 static LRESULT CALLBACK ResourceProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
     if(msg==WM_TIMER){SetWindowTextW(resourceText,ResourceReport().c_str());return 0;}
@@ -807,12 +838,29 @@ static void ShowResources() {
     resourceText=Control(resourceWindow,L"STATIC",ResourceReport().c_str(),0,18,16,495,350,0);SetTimer(resourceWindow,ResourceTimer,1000,nullptr);ShowWindow(resourceWindow,SW_SHOW);SetForegroundWindow(resourceWindow);
 }
 static void RootMenu() {
-    ClosePopup();HMENU menu=CreatePopupMenu();AppendMenuW(menu,MF_STRING,1,L"设置分组…");AppendMenuW(menu,MF_STRING,2,L"资源占用");CaptureTimer::AddMenu(menu);AppendMenuW(menu,MF_STRING,4,L"重新加载配置并刷新");AppendMenuW(menu,MF_STRING,7,L"编辑 groups.ini 配置文件");AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING,5,L"恢复全部原图标并暂停折叠");AppendMenuW(menu,MF_STRING,6,L"退出（恢复原图标）");POINT pt;GetCursorPos(&pt);SetForegroundWindow(mainWindow);int id=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,pt.x,pt.y,0,mainWindow,nullptr);DestroyMenu(menu);PostMessageW(mainWindow,WM_NULL,0,0);
+    DebugLog::Write(L"MENU open");ClosePopup();HMENU menu=CreatePopupMenu();
+    AppendMenuW(menu,MF_STRING,1,L"设置分组…");AppendMenuW(menu,MF_STRING,2,L"资源占用");CaptureTimer::AddMenu(menu);
+    AppendMenuW(menu,MF_STRING,4,L"重新加载配置并刷新");AppendMenuW(menu,MF_STRING,7,L"编辑 groups.ini 配置文件");
+    AppendMenuW(menu,MF_STRING,8,L"打开本地调试日志");AppendMenuW(menu,MF_STRING|(DebugLog::enabled.load()?MF_CHECKED:0),9,L"记录本地调试日志");
+    AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING,5,L"恢复全部原图标并暂停折叠");AppendMenuW(menu,MF_STRING,6,L"退出（恢复原图标）");
+    POINT pt;GetCursorPos(&pt);SetForegroundWindow(mainWindow);int id=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,pt.x,pt.y,0,mainWindow,nullptr);DestroyMenu(menu);PostMessageW(mainWindow,WM_NULL,0,0);
+    DebugLog::Write(L"MENU command="+Number(id));
+    if(id==8){ShellExecuteW(mainWindow,L"open",L"notepad.exe",(L"\""+DebugLog::path+L"\"").c_str(),baseDir.c_str(),SW_SHOWNORMAL);return;}
+    if(id==9){bool previous=DebugLog::enabled.load();DebugLog::Write(L"DEBUG logging disabled");DebugLog::enabled=!previous;if(!SaveSettings()){DebugLog::enabled=previous;MessageBoxW(mainWindow,L"无法保存日志开关",L"TrayGroups",MB_ICONERROR);}else DebugLog::Write(L"DEBUG logging enabled");return;}
     if(CaptureTimer::HandleMenu(id))return;
     if(id==1)ShowSettings();else if(id==2)ShowResources();else if(id==4){RestoreHidden();LoadSettings();Refresh();if(settingsWindow)FillSettings();}else if(id==5){foldIcons=false;SaveSettings();RestoreHidden();Refresh();}else if(id==6)PostMessageW(mainWindow,StopApp,0,0);else if(id==7){std::wstring cmd=L"notepad.exe \""+configPath+L"\"";STARTUPINFOW si={};si.cb=sizeof(si);PROCESS_INFORMATION pi={};if(CreateProcessW(nullptr,&cmd[0],nullptr,nullptr,FALSE,0,nullptr,nullptr,&si,&pi)){CloseHandle(pi.hThread);CloseHandle(pi.hProcess);}}
 }
 static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
-    if(msg==TrayCallback){UINT id=HIWORD(l),event=LOWORD(l);if(!notificationGroups.count(id))return 0;if(event==WM_CONTEXTMENU)PostMessageW(h,WM_APP+8,2,0);else if(event==NIN_SELECT||event==NIN_KEYSELECT)PostMessageW(h,WM_APP+8,1,id);return 0;}
+    if(msg==TrayCallback){
+        bool legacy=HIWORD(l)==0;UINT id=legacy?(UINT)w:HIWORD(l),event=LOWORD(l);
+        if(event!=WM_MOUSEMOVE)DebugLog::Write(L"TRAY callback id="+Number(id)+L" event="+Number(event)+L" known="+Number(notificationGroups.count(id)));
+        // The single T entry always uses ID 1. Explorer can retain it while our
+        // registration cache is being rebuilt; cache loss must not disable input.
+        if(id!=1)return 0;
+        if(event==WM_CONTEXTMENU||(legacy&&event==WM_RBUTTONUP))PostMessageW(h,WM_APP+8,2,0);
+        else if(event==NIN_SELECT||event==NIN_KEYSELECT||(legacy&&event==WM_LBUTTONUP))PostMessageW(h,WM_APP+8,1,id);
+        return 0;
+    }
     if(msg==WM_APP+8){if(w==2)RootMenu();else if(l==1){if(popupWindow)ClosePopup();else{popupPage=0;ShowGroups();}}return 0;}
     if(msg==WM_TIMER&&w==RefreshTimer){if(!popupWindow&&!settingsWindow)Refresh();return 0;}
     if(msg==WM_TIMER&&w==CaptureTimer::TimerId()){CaptureTimer::OnTimer();return 0;}
@@ -820,14 +868,15 @@ static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
         if(!popupWindow&&!settingsWindow)Refresh();
         if(--reFoldAttempts<=0)KillTimer(h,ReFoldTimer);return 0;
     }
-    if(msg==StopApp){RestoreHidden();if(CaptureTimer::IsBusy()){stopAfterCapture=true;return 0;}if(hidden.empty())DestroyWindow(h);else{foldIcons=false;LogError(L"退出已暂停：请先恢复剩余图标");}return 0;}
+    if(msg==StopApp){DebugLog::Write(L"STOP requested busy="+Number(CaptureTimer::IsBusy()));RestoreHidden();if(CaptureTimer::IsBusy()){stopAfterCapture=true;CaptureTimer::PrepareStop();return 0;}if(hidden.empty())DestroyWindow(h);else{foldIcons=false;LogError(L"退出已暂停：请先恢复剩余图标");}return 0;}
     if(msg==RefreshApp){RestoreHidden();LoadSettings();Refresh();if(settingsWindow)FillSettings();return 0;}
     if(msg==WM_COMMAND&&LOWORD(w)==1){ShowSettings();return 0;}
+    if(msg==WM_COMMAND&&CaptureTimer::HandleMenu(LOWORD(w)))return 0;
     if(msg==WM_WTSSESSION_CHANGE){CaptureTimer::OnSessionChange(w);return 0;}
     if(msg==WM_QUERYENDSESSION){if(CaptureTimer::IsBusy())return FALSE;RestoreHidden();return TRUE;}
     if(msg==taskbarCreated){hidden.clear();notificationGroups.clear();notificationCount=0;for(auto& p:notificationIcons)DestroyIcon(p.second);notificationIcons.clear();SetTimer(h,RefreshTimer,30000,nullptr);Refresh();return 0;}
     if(msg==WM_DESTROY){shuttingDown=true;KillTimer(h,RefreshTimer);KillTimer(h,ReFoldTimer);ClosePopup();if(settingsWindow)DestroyWindow(settingsWindow);if(resourceWindow)DestroyWindow(resourceWindow);CaptureTimer::Shutdown();WTSUnRegisterSessionNotification(h);RestoreHidden();DeleteNotifications();FreeItems(items);PostQuitMessage(0);return 0;}
-    if(msg==CaptureTimer::CompletionMessage()){CaptureTimer::OnCompletion();if(stopAfterCapture)PostMessageW(h,StopApp,0,0);return 0;}
+    if(msg==CaptureTimer::CompletionMessage()){CaptureTimer::OnCompletion(w!=0);if(popupWindow)SetDlgItemTextW(popupWindow,CaptureStatusControl,CaptureTimer::StatusText().c_str());if(stopAfterCapture)PostMessageW(h,StopApp,0,0);return 0;}
     return DefWindowProcW(h,msg,w,l);
 }
 
@@ -847,7 +896,9 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR cmd,int) {
     appIcon=MakeAppIcon();
     struct Registration{const wchar_t* name;WNDPROC proc;UINT style;};Registration classes[]={{AppClass,MainProc,0},{PopupClass,PopupProc,CS_DBLCLKS},{L"Crli.TrayGroups.Resources",ResourceProc,0}};
     for(auto c:classes){WNDCLASSW wc={};wc.lpfnWndProc=c.proc;wc.hInstance=instance;wc.lpszClassName=c.name;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);wc.style=c.style;wc.hIcon=appIcon;RegisterClassW(&wc);}
-    taskbarCreated=RegisterWindowMessageW(L"TaskbarCreated");LoadSettings();if(GetFileAttributesW(configPath.c_str())==INVALID_FILE_ATTRIBUTES)SaveSettings();RecoverIcons();mainWindow=CreateWindowExW(WS_EX_TOOLWINDOW,AppClass,L"TrayGroups 托盘分组器",WS_POPUP,0,0,0,0,nullptr,nullptr,instance,nullptr);
+    taskbarCreated=RegisterWindowMessageW(L"TaskbarCreated");DebugLog::Initialize(baseDir);LoadSettings();
+    DebugLog::Write(L"START version=1.1.1 exe="+ExePath()+L" config="+configPath);
+    if(GetFileAttributesW(configPath.c_str())==INVALID_FILE_ATTRIBUTES)SaveSettings();RecoverIcons();mainWindow=CreateWindowExW(WS_EX_TOOLWINDOW,AppClass,L"TrayGroups 托盘分组器",WS_POPUP,0,0,0,0,nullptr,nullptr,instance,nullptr);
     if(!mainWindow){CloseHandle(mutex);return 1;}ShowWindow(mainWindow,SW_HIDE);CaptureTimer::Initialize(mainWindow,instance,baseDir);WTSRegisterSessionNotification(mainWindow,NOTIFY_FOR_THIS_SESSION);Refresh();SetTimer(mainWindow,RefreshTimer,30000,nullptr);if(args!=L"--background")ShowSettings();
     MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){if(settingsWindow&&IsDialogMessageW(settingsWindow,&msg))continue;TranslateMessage(&msg);DispatchMessageW(&msg);}
     if(appFont)DeleteObject(appFont);if(appIcon)DestroyIcon(appIcon);ReleaseMutex(mutex);CloseHandle(mutex);return 0;

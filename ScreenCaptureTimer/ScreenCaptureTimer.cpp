@@ -13,6 +13,7 @@
 #include <atomic>
 #include <string>
 #include <vector>
+#include "../DebugLog.h"
 #ifndef SCREEN_CAPTURE_EMBEDDED
 #include "NativeResources.h"
 #endif
@@ -21,6 +22,8 @@ namespace CaptureTimer {
 
 static const wchar_t* AppClass=L"Crli.ScreenCaptureTimer.Native";
 static const UINT NotifyMessage=WM_APP+1,WorkerDone=WM_APP+2,StopMessage=WM_APP+3;
+static const UINT IntegratedTimer=WM_APP+30,IntegratedDone=WM_APP+31;
+static UINT completionMessage=WorkerDone;
 struct Settings {std::wstring directory,format=L"HH-mm";};
 static Settings settings;
 static std::wstring root,configPath,lastError;
@@ -31,6 +34,7 @@ static std::atomic<SIZE_T> capturePeak(0);
 static bool paused=false,locked=false,stopRequested=false;
 static ULONGLONG nextTime=0,previousTime=0;
 static UINT taskbarCreated;
+static std::wstring completionStatus=L"尚未截图";
 
 static std::wstring Trim(const std::wstring& s){size_t a=s.find_first_not_of(L" \t\r\n");return a==std::wstring::npos?L"":s.substr(a,s.find_last_not_of(L" \t\r\n")-a+1);}
 static std::string Utf8(const std::wstring& s){int n=WideCharToMultiByte(CP_UTF8,0,s.data(),s.size(),nullptr,0,nullptr,nullptr);std::string r(n,0);if(n)WideCharToMultiByte(CP_UTF8,0,s.data(),s.size(),&r[0],n,nullptr,nullptr);return r;}
@@ -40,7 +44,16 @@ static bool TextFile(const std::wstring& path,const std::wstring& text){HANDLE h
 static std::wstring ReadFileText(const std::wstring& path){HANDLE h=CreateFileW(path.c_str(),GENERIC_READ,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);if(h==INVALID_HANDLE_VALUE)return L"";DWORD size=GetFileSize(h,nullptr);if(size>1024*1024){CloseHandle(h);return L"";}std::string b(size,0);DWORD n=0;ReadFile(h,b.empty()?nullptr:&b[0],size,&n,nullptr);CloseHandle(h);b.resize(n);return Wide(b);}
 static std::wstring Json(const std::wstring& s){std::wstring r=L"\"";for(auto c:s){if(c==L'\\'||c==L'"'){r+=L'\\';r+=c;}else if(c==L'\r')r+=L"\\r";else if(c==L'\n')r+=L"\\n";else if(c==L'\t')r+=L"\\t";else r+=c;}return r+L"\"";}
 static std::wstring JsonValue(const std::wstring& s,const wchar_t* key){size_t p=s.find(L"\""+std::wstring(key)+L"\"");if(p==std::wstring::npos)return L"";p=s.find(L':',p);if(p==std::wstring::npos)return L"";p=s.find(L'"',p);if(p==std::wstring::npos)return L"";std::wstring r;for(++p;p<s.size();p++){wchar_t c=s[p];if(c==L'"')return r;if(c==L'\\'&&p+1<s.size()){c=s[++p];if(c==L'n')c=L'\n';else if(c==L'r')c=L'\r';else if(c==L't')c=L'\t';else if(c==L'u'&&p+4<s.size()){std::wstring hex=s.substr(p+1,4);c=(wchar_t)wcstoul(hex.c_str(),nullptr,16);p+=4;}}r+=c;}return L"";}
-static void Log(const std::wstring& message){SYSTEMTIME t;GetLocalTime(&t);wchar_t stamp[64];swprintf_s(stamp,L"%04u-%02u-%02u %02u:%02u:%02u ",t.wYear,t.wMonth,t.wDay,t.wHour,t.wMinute,t.wSecond);HANDLE h=CreateFileW((root+L"\\activity.log").c_str(),FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);if(h!=INVALID_HANDLE_VALUE){auto s=Utf8(stamp+message+L"\r\n");WriteAll(h,s.data(),s.size());CloseHandle(h);}}
+static void Log(const std::wstring& message){
+    DebugLog::Write(L"CAPTURE "+message);
+#ifndef SCREEN_CAPTURE_EMBEDDED
+    // Preserve the legacy standalone log; the host uses one bounded debug log.
+    SYSTEMTIME t;GetLocalTime(&t);wchar_t stamp[64];
+    swprintf_s(stamp,L"%04u-%02u-%02u %02u:%02u:%02u ",t.wYear,t.wMonth,t.wDay,t.wHour,t.wMinute,t.wSecond);
+    HANDLE h=CreateFileW((root+L"\\activity.log").c_str(),FILE_APPEND_DATA,FILE_SHARE_READ|FILE_SHARE_WRITE,nullptr,OPEN_ALWAYS,FILE_ATTRIBUTE_NORMAL,nullptr);
+    if(h!=INVALID_HANDLE_VALUE){auto s=Utf8(stamp+message+L"\r\n");WriteAll(h,s.data(),s.size());CloseHandle(h);}
+#endif
+}
 static bool MakeDirectories(const std::wstring& p){if(p.empty())return false;DWORD a=GetFileAttributesW(p.c_str());if(a!=INVALID_FILE_ATTRIBUTES)return (a&FILE_ATTRIBUTE_DIRECTORY)!=0;size_t slash=p.find_last_of(L"\\/");if(slash!=std::wstring::npos&&slash>2&&!MakeDirectories(p.substr(0,slash)))return false;return CreateDirectoryW(p.c_str(),nullptr)||GetLastError()==ERROR_ALREADY_EXISTS;}
 static ULONGLONG Ticks(const SYSTEMTIME& t){FILETIME f;if(!SystemTimeToFileTime(&t,&f))return 0;ULARGE_INTEGER u;u.LowPart=f.dwLowDateTime;u.HighPart=f.dwHighDateTime;return u.QuadPart;}
 static SYSTEMTIME FromTicks(ULONGLONG n){ULARGE_INTEGER u;u.QuadPart=n;FILETIME f={u.LowPart,u.HighPart};SYSTEMTIME t={};FileTimeToSystemTime(&f,&t);return t;}
@@ -95,14 +108,34 @@ static bool Capture(const Settings& s){
     std::vector<Monitor> monitors;EnumDisplayMonitors(nullptr,nullptr,MonitorProc,(LPARAM)&monitors);if(monitors.empty())return false;RECT bounds=monitors[0].rect;for(auto& m:monitors)UnionRect(&bounds,&bounds,&m.rect);
     SYSTEMTIME t;GetLocalTime(&t);wchar_t day[32];swprintf_s(day,L"%04u-%02u-%02u",t.wYear,t.wMonth,t.wDay);std::wstring dir=s.directory+L"\\"+day,name=FormatName(s.format,t);if(name.empty()||!MakeDirectories(dir)){lastError=L"目录或文件名格式无效";Log(L"CAPTURE ERROR "+lastError);return false;}
     HANDLE file=INVALID_HANDLE_VALUE;std::wstring path;for(unsigned n=0;n<10000;n++){path=dir+L"\\"+name+(n?L"_"+std::to_wstring(n+1):L"")+L".png";file=CreateFileW(path.c_str(),GENERIC_WRITE,FILE_SHARE_READ,nullptr,CREATE_NEW,FILE_ATTRIBUTE_NORMAL,nullptr);if(file!=INVALID_HANDLE_VALUE)break;if(GetLastError()!=ERROR_FILE_EXISTS&&GetLastError()!=ERROR_ALREADY_EXISTS)break;}
-    if(file==INVALID_HANDLE_VALUE){Log(L"CAPTURE ERROR cannot create PNG");return false;}
+    if(file==INVALID_HANDLE_VALUE){Log(L"ERROR cannot create PNG path="+path+L" win32="+std::to_wstring(GetLastError()));return false;}
     bool ok=EncodeDesktop(file,monitors,bounds);CloseHandle(file);if(!ok){DeleteFileW(path.c_str());Log(L"CAPTURE ERROR encoding failed");return false;}
     std::wstring json=L"{\"file\":"+Json(path)+L",\"width\":"+std::to_wstring(bounds.right-bounds.left)+L",\"height\":"+std::to_wstring(bounds.bottom-bounds.top)+L",\"capturePeakPrivateWorkingSetBytes\":"+std::to_wstring(capturePeak.load())+L",\"monitors\":[";
     for(size_t i=0;i<monitors.size();i++){auto& m=monitors[i];if(i)json+=L",";json+=L"{\"name\":"+Json(m.name)+L",\"primary\":"+(m.primary?L"true":L"false")+L",\"left\":"+std::to_wstring(m.rect.left)+L",\"top\":"+std::to_wstring(m.rect.top)+L",\"width\":"+std::to_wstring(m.rect.right-m.rect.left)+L",\"height\":"+std::to_wstring(m.rect.bottom-m.rect.top)+L"}";}
     TextFile(root+L"\\last-capture.json",json+L"],\"durationMs\":"+std::to_wstring(GetTickCount64()-started)+L"}");Log(L"SAVED "+path+L" native-streaming monitors="+std::to_wstring(monitors.size())+L" size="+std::to_wstring(bounds.right-bounds.left)+L"x"+std::to_wstring(bounds.bottom-bounds.top)+L" durationMs="+std::to_wstring(GetTickCount64()-started));return true;
 }
-static DWORD WINAPI Worker(void* p){Settings* s=(Settings*)p;Capture(*s);delete s;busy=false;if(mainWindow)PostMessageW(mainWindow,WorkerDone,0,0);return 0;}
-static void QueueCapture(){if(locked||busy.exchange(true)){Log(L"SKIP locked or busy");return;}Log(L"CAPTURE QUEUED");Settings* s=new Settings(settings);HANDLE thread=CreateThread(nullptr,256*1024,Worker,s,STACK_SIZE_PARAM_IS_A_RESERVATION,nullptr);if(thread)CloseHandle(thread);else{delete s;busy=false;Log(L"CAPTURE ERROR cannot create worker");}}
+#ifdef NATIVE_TEST_BUILD
+static bool (*testCapture)(const Settings&)=nullptr;
+#endif
+static DWORD WINAPI Worker(void* p){
+    // Keep PNG encoding behind foreground work without lowering tray UI priority.
+    if(!SetThreadPriority(GetCurrentThread(),THREAD_PRIORITY_BELOW_NORMAL))
+        Log(L"ERROR SetThreadPriority win32="+std::to_wstring(GetLastError()));
+    Settings* s=(Settings*)p;
+#ifdef NATIVE_TEST_BUILD
+    bool ok=testCapture?testCapture(*s):Capture(*s);
+#else
+    bool ok=Capture(*s);
+#endif
+    delete s;Log(L"WORKER done success="+std::to_wstring(ok)+L" message="+std::to_wstring(completionMessage));
+    if(!PostMessageW(mainWindow,completionMessage,ok,0)){Log(L"ERROR completion PostMessage win32="+std::to_wstring(GetLastError()));busy=false;}
+    return 0;
+}
+static void QueueCapture(){
+    if(stopRequested||locked||busy.exchange(true)){Log(L"SKIP stopping="+std::to_wstring(stopRequested)+L" locked="+std::to_wstring(locked)+L" busy="+std::to_wstring(busy.load()));return;}
+    Log(L"QUEUED");Settings* s=new Settings(settings);HANDLE thread=CreateThread(nullptr,256*1024,Worker,s,STACK_SIZE_PARAM_IS_A_RESERVATION,nullptr);
+    if(thread)CloseHandle(thread);else{DWORD error=GetLastError();delete s;busy=false;completionStatus=L"截图线程启动失败";Log(L"ERROR CreateThread win32="+std::to_wstring(error));}
+}
 static std::wstring ResourceText(bool json=false){auto m=NativeResources::Read();wchar_t b[1800];static ULONGLONG lastWall=0;static double lastCpu=0;ULONGLONG now=GetTickCount64();SYSTEM_INFO sys;GetSystemInfo(&sys);double percent=lastWall&&now>lastWall?(m.cpuSeconds-lastCpu)*100000.0/(now-lastWall)/std::max(1ul,sys.dwNumberOfProcessors):0;lastWall=now;lastCpu=m.cpuSeconds;
     if(json)swprintf_s(b,L"{\"pid\":%lu,\"taskManagerPrivateWorkingSetBytes\":%llu,\"privateBytes\":%llu,\"totalWorkingSetBytes\":%llu,\"capturePeakPrivateWorkingSetBytes\":%llu,\"cpuSeconds\":%.3f,\"cpuPercent\":%.3f}",GetCurrentProcessId(),(unsigned long long)m.privateWorking,(unsigned long long)m.privateCommit,(unsigned long long)m.working,(unsigned long long)capturePeak.load(),m.cpuSeconds,percent);
     else swprintf_s(b,L"TrayGroups 定时截图\r\n\r\n任务管理器口径（专用工作集）：%.2f MiB\r\n专用提交内存：%.2f MiB\r\n总工作集（含共享内存）：%.2f MiB\r\n最近截图采样峰值（进程专用工作集）：%.2f MiB\r\nCPU 当前：%.2f %%    累计：%.2f 秒\r\n\r\n不强制清空工作集。",m.privateWorking/1048576.0,m.privateCommit/1048576.0,m.working/1048576.0,capturePeak.load()/1048576.0,percent,m.cpuSeconds);return b;}
@@ -122,7 +155,7 @@ static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM w,LPARAM l){
     if(msg==WM_APP+8){if(w==2)Menu();else ShowSettings();return 0;}
     if(msg==WM_TIMER){if(stopRequested){if(!busy)DestroyWindow(h);return 0;}ULONGLONG now=Now();if(now+20000000<previousTime||now>previousTime+100000000)nextTime=Next(now);previousTime=now;if(now>=nextTime){nextTime=Next(now);if(!paused&&!locked)QueueCapture();Notification(false);}return 0;}
     if(msg==WM_WTSSESSION_CHANGE){if(w==WTS_SESSION_LOCK)locked=true;else if(w==WTS_SESSION_UNLOCK){locked=false;nextTime=Next(Now());}return 0;}
-    if(msg==WorkerDone){Log(L"CAPTURE memory sampledPrivateWorkingSetPeak="+std::to_wstring(capturePeak.load()));return 0;}
+    if(msg==WorkerDone){busy=false;Log(L"CAPTURE completed success="+std::to_wstring(w));return 0;}
     if(msg==StopMessage||msg==WM_CLOSE){if(busy){stopRequested=true;return 0;}DestroyWindow(h);return 0;}
     if(msg==WM_COMMAND){if(LOWORD(w)==1)ShowSettings();else if(LOWORD(w)==2)QueueCapture();return 0;}
     if(msg==taskbarCreated){Notification(true);return 0;}
@@ -130,15 +163,13 @@ static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM w,LPARAM l){
     return DefWindowProcW(h,msg,w,l);
 }
 
-static const UINT IntegratedTimer=WM_APP+30;
-static const UINT IntegratedDone=WM_APP+31;
 static const UINT CaptureNowCommand=2101,PauseCommand=2102,SettingsCommand=2103,ResourcesCommand=2104,FolderCommand=2105;
 static HINSTANCE hostInstance=nullptr;
 static bool initialized=false;
 
 void Initialize(HWND owner,HINSTANCE instance,const std::wstring& directory) {
     if(initialized)return;
-    initialized=true;mainWindow=owner;hostInstance=instance;root=directory;configPath=root+L"\\config.json";
+    initialized=true;mainWindow=owner;hostInstance=instance;completionMessage=IntegratedDone;stopRequested=false;root=directory;configPath=root+L"\\config.json";
     bool migrate=GetFileAttributesW(configPath.c_str())==INVALID_FILE_ATTRIBUTES;
     if(migrate){std::wstring legacy=root+L"\\ScreenCaptureTimer\\config.json";if(GetFileAttributesW(legacy.c_str())!=INVALID_FILE_ATTRIBUTES)configPath=legacy;}
     Load();if(GetFileAttributesW(configPath.c_str())==INVALID_FILE_ATTRIBUTES&&!Save(settings))Log(L"CONFIG ERROR cannot create portable config");
@@ -148,7 +179,8 @@ void Initialize(HWND owner,HINSTANCE instance,const std::wstring& directory) {
     for(auto reg:{Registration{L"Crli.Capture.Settings",SettingsProc},Registration{L"Crli.Capture.Resources",ResourceProc}}){
         WNDCLASSW wc={};wc.hInstance=hostInstance;wc.lpszClassName=reg.cls;wc.lpfnWndProc=reg.proc;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);RegisterClassW(&wc);
     }
-    previousTime=Now();nextTime=Next(previousTime);SetTimer(mainWindow,IntegratedTimer,500,nullptr);
+    previousTime=Now();nextTime=Next(previousTime);
+    if(!SetTimer(mainWindow,IntegratedTimer,500,nullptr))Log(L"ERROR SetTimer win32="+std::to_wstring(GetLastError()));
     Log(L"START integrated capture; fileFormat="+settings.format+L" output="+settings.directory);
 }
 UINT CompletionMessage(){return IntegratedDone;}
@@ -159,8 +191,22 @@ void OnTimer(){
     if(now>=nextTime){nextTime=Next(now);if(!paused&&!locked)QueueCapture();}
 }
 void OnSessionChange(WPARAM event){if(event==WTS_SESSION_LOCK)locked=true;else if(event==WTS_SESSION_UNLOCK){locked=false;nextTime=Next(Now());}}
-void OnCompletion(){Log(L"CAPTURE memory sampledPrivateWorkingSetPeak="+std::to_wstring(capturePeak.load()));}
-void ShowCaptureSettings(){ShowSettings();}
+void OnCompletion(bool success){
+    busy=false;SYSTEMTIME now;GetLocalTime(&now);wchar_t stamp[30];swprintf_s(stamp,L"%02u:%02u:%02u",now.wHour,now.wMinute,now.wSecond);
+    completionStatus=success?L"已保存 "+std::wstring(stamp):L"截图失败，请查看日志";
+    Log(L"COMPLETE received success="+std::to_wstring(success)+L" sampledPrivateWorkingSetPeak="+std::to_wstring(capturePeak.load()));
+}
+void PrepareStop(){stopRequested=true;}
+std::wstring StatusText(){
+    if(!initialized)return L"定时截图尚未初始化";
+    SYSTEMTIME t=FromTicks(nextTime);wchar_t stamp[30];swprintf_s(stamp,L"%02u:%02u",t.wHour,t.wMinute);
+    std::wstring state=busy?L"正在截图…":paused?L"定时截图已暂停":locked?L"锁屏暂停截图":L"下次截图 "+std::wstring(stamp);
+    return state+L" · "+completionStatus;
+}
+void ShowCaptureSettings(){
+    Log(L"SETTINGS open requested");ShowSettings();
+    Log(L"SETTINGS hwnd="+std::to_wstring((ULONG_PTR)settingsWindow)+L" visible="+std::to_wstring(settingsWindow&&IsWindowVisible(settingsWindow))+L" win32="+std::to_wstring(GetLastError()));
+}
 void AddMenu(HMENU parent){
     HMENU submenu=CreatePopupMenu();SYSTEMTIME t=FromTicks(nextTime);wchar_t status[80];
     swprintf_s(status,L"下次截图：%02u:%02u（每 10 分钟）",t.wHour,t.wMinute);
@@ -173,9 +219,10 @@ void AddMenu(HMENU parent){
     AppendMenuW(parent,MF_POPUP,(UINT_PTR)submenu,L"定时截图");
 }
 bool HandleMenu(UINT command){
+    if(command>=CaptureNowCommand&&command<=FolderCommand)Log(L"COMMAND id="+std::to_wstring(command));
     if(command==CaptureNowCommand)QueueCapture();
     else if(command==PauseCommand){paused=!paused;nextTime=Next(Now());}
-    else if(command==SettingsCommand)ShowSettings();
+    else if(command==SettingsCommand)ShowCaptureSettings();
     else if(command==ResourcesCommand)ShowResources();
     else if(command==FolderCommand)OpenFolder();
     else return false;

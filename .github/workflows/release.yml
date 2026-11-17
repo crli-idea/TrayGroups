@@ -36,6 +36,10 @@ jobs:
         shell: pwsh
         run: .\ScreenCaptureTimer\test\run.ps1
 
+      - name: Test capture and tray callback integration
+        shell: pwsh
+        run: .\test\capture-integration.ps1
+
       - name: Package portable binaries
         shell: pwsh
         run: |
