@@ -9,6 +9,7 @@
 #define IDC_RESOURCES 103
 #define IDC_CLOSE 104
 #define IDC_UNGROUP 105
+#define IDC_RESTORE_ALL 106
 #define IDC_GROUP 110
 #define IDC_FOLD 111
 #define IDC_SCOPE 112

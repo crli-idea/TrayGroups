@@ -48,6 +48,22 @@ template<class Check> static void CheckTrayScanning(Check check,std::wstring& re
     wchar_t timing[200];swprintf_s(timing,L"BENCH 20 scans x 24 icons: with images=%.3f ms; metadata=%.3f ms\n",fullMs,lightMs);report+=timing;
     testingOwnIcons=false;DestroyWindow(toolbar);
 }
+template<class Check> static void CheckRecoveryJournal(Check check){
+    std::wstring previous=recoveryPath;recoveryPath=baseDir+L"\\durable-recovery.ini";hidden.clear();
+    Hidden record;record.owner=mainWindow;record.id=62100;record.runtime={GetCurrentProcessId(),ProcessStart(GetCurrentProcess()),mainWindow,record.id};
+    hidden={record};bool wrote=WriteRecovery();hidden.clear();RestoreHidden();
+    check(wrote&&hidden.size()==1&&!ReadText(recoveryPath).empty(),L"disk ownership journal survives memory loss and an unenumerated live icon");
+    RestoreUnassigned();FoldAssigned();
+    check(hidden.size()==1&&!ReadText(recoveryPath).empty(),L"refresh preserves a pending disk recovery record");
+    std::vector<Hidden> parsed;check(ReadRecoveryFile(recoveryPath,parsed)&&parsed.size()==1&&!parsed[0].originalHidden,L"readable recovery INI retains the original visibility state");
+    hidden.clear();DeleteFileW(recoveryPath.c_str());
+    std::wstring corrupt=L"[Recovery]\nVersion=2\n[Icon1]\nIconId=62100\n";WriteText(recoveryPath,corrupt);RestoreHidden();
+    check(!recoveryHealthy&&ReadText(recoveryPath)==corrupt,L"invalid ownership journals are preserved rather than overwritten");
+    DeleteFileW(recoveryPath.c_str());recoveryHealthy=true;
+    std::wstring old=Number((ULONG_PTR)mainWindow)+L"\t"+Number(record.id)+L"\t"+Number(record.runtime.pid)+L"\t"+Number(record.runtime.started)+L"\n";
+    WriteText(recoveryPath,old);parsed.clear();check(ReadRecoveryFile(recoveryPath,parsed)&&parsed.size()==1&&parsed[0].runtime==record.runtime,L"legacy TSV ownership journals remain readable");
+    DeleteFileW(recoveryPath.c_str());hidden.clear();recoveryPath=previous;
+}
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int){
     baseDir=ExePath();baseDir.resize(baseDir.find_last_of(L'\\'));baseDir+=L"\\capture-integration";
     CaptureTimer::MakeDirectories(baseDir);configPath=baseDir+L"\\groups.ini";recoveryPath=baseDir+L"\\restore-icons.tsv";
@@ -57,6 +73,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int){
     WNDCLASSW wc={};wc.hInstance=instance;wc.lpfnWndProc=Receiver;wc.lpszClassName=L"Crli.Capture.IntegrationTest";RegisterClassW(&wc);
     mainWindow=CreateWindowW(wc.lpszClassName,L"",WS_POPUP,0,0,0,0,nullptr,nullptr,instance,nullptr);
     CheckTrayScanning(check,report);
+    CheckRecoveryJournal(check);
     std::wstring originalConfig=configPath;configPath=baseDir+L"\\..\\..\\..\\defaults\\groups.ini";LoadSettings();
     check(!ReadText(configPath).empty()&&assignments.empty()&&pathAssignments.empty()&&programAssignments.empty()&&iconMatch==L"path-class-id"&&foldIcons,L"shipped INI loads portable defaults without personal grouping rules");configPath=originalConfig;
     check(NativeResources::ThreadCount()>0,L"shared resource sampler reports this process's threads");
@@ -83,7 +100,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int){
     check(WaitForCompletion()&&CaptureTimer::StatusText().find(L"失败")!=std::wstring::npos,L"failed worker clears busy state and shows failure");
     wc.lpfnWndProc=PopupProc;wc.lpszClassName=PopupClass;RegisterClassW(&wc);
     popupWindow=NewPopup();AttachCaptureControls(20);
-    check(GetDlgItem(popupWindow,CaptureStatusControl)&&GetDlgItem(popupWindow,CaptureTimer::SettingsCommand),L"T panel has screenshot status and settings controls");
+    check(GetDlgItem(popupWindow,CaptureStatusControl)&&GetDlgItem(popupWindow,CaptureTimer::SettingsCommand)&&GetDlgItem(popupWindow,IDC_RESTORE_ALL),L"T panel has screenshot controls and a restore-all button");
     outcome=true;HWND popup=popupWindow;
     SendMessageW(popup,WM_COMMAND,CaptureTimer::CaptureNowCommand,0);
     MSG command={};bool posted=PeekMessageW(&command,mainWindow,WM_COMMAND,WM_COMMAND,PM_REMOVE)!=0;

@@ -6,6 +6,8 @@ activity.log
 last-capture.json
 TrayGroups.debug.log*
 restore-icons.tsv
+restore-icons.ini
+restore-icons.ini.tmp
 ScreenCaptureTimer/config.json
 ScreenCaptureTimer/Captures/
 ScreenCaptureTimer/activity.log

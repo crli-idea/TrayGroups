@@ -131,7 +131,7 @@ static LRESULT CALLBACK PopupProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
         return 0;
     case WM_COMMAND:{
         UINT command=LOWORD(w);
-        if(command==CaptureTimer::CaptureNowCommand||command==CaptureTimer::SettingsCommand){
+        if(command==CaptureTimer::CaptureNowCommand||command==CaptureTimer::SettingsCommand||command==IDC_RESTORE_ALL){
             DebugLog::Write(L"POPUP capture button="+Number(command));ClosePopup();PostMessageW(mainWindow,WM_COMMAND,command,0);
         }
         return 0;
@@ -151,9 +151,10 @@ static void AttachCaptureControls(int top){
     std::wstring status=CaptureTimer::StatusText();
     Entry controls[]={{L"STATIC",status.c_str(),top,popupWidth-24,(int)CaptureStatusControl},
         {L"BUTTON",L"立即截图",top+25,100,(int)CaptureTimer::CaptureNowCommand},
-        {L"BUTTON",L"截图设置…",top+25,100,(int)CaptureTimer::SettingsCommand}};
-    for(int n=0;n<3;n++){
-        const auto& c=controls[n];int x=n==2?124:12;
+        {L"BUTTON",L"截图设置…",top+25,100,(int)CaptureTimer::SettingsCommand},
+        {L"BUTTON",L"恢复全部图标",top+25,170,IDC_RESTORE_ALL}};
+    for(int n=0;n<4;n++){
+        const auto& c=controls[n];int x=n>=2?124+(n-2)*112:12;
         HWND control=CreateWindowExW(0,c.cls,c.text,WS_CHILD|WS_VISIBLE|(n?WS_TABSTOP|BS_PUSHBUTTON:SS_ENDELLIPSIS),x,c.y,c.width,24,popupWindow,(HMENU)(INT_PTR)c.id,GetModuleHandleW(nullptr),nullptr);
         if(control)SendMessageW(control,WM_SETFONT,(WPARAM)appFont,TRUE);else LogError(L"创建截图控件失败，Win32="+Number(GetLastError()));
     }

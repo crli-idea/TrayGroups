@@ -142,6 +142,7 @@ static INT_PTR CALLBACK SettingsProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
         if(id==IDC_APPLY||id==IDOK){ApplySettings(h);return TRUE;}
         if(id==IDC_UNGROUP){SetWindowTextW(groupEdit,L"");ApplyGroupEdit();return TRUE;}
         if(id==IDC_RESOURCES){ShowResources();return TRUE;}
+        if(id==IDC_RESTORE_ALL){PostMessageW(mainWindow,RestoreAllApp,0,0);return TRUE;}
         if(id==IDC_CLOSE||id==IDCANCEL){SendMessageW(h,WM_CLOSE,0,0);return TRUE;}
     }
     if(msg==WM_NOTIFY){

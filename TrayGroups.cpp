@@ -20,6 +20,7 @@
 #include "NativeResources.h"
 #include "DebugLog.h"
 #include "AppVersion.h"
+#include "TraySettingsIds.h"
 #include "ScreenCaptureTimer/CaptureTimer.h"
 #ifdef NATIVE_TEST_BUILD
 // Isolated tests can inject a fake encoder; production links a separate module.
@@ -32,7 +33,8 @@ static const wchar_t* PopupClass=L"Crli.TrayGroups.Popup";
 static const UINT TrayCallback=WM_APP+1;
 static const UINT StopApp=WM_APP+3;
 static const UINT RefreshApp=WM_APP+4;
-static const int ResourceTimer=2, RefreshTimer=3, SingleTimer=4, ReFoldTimer=5;
+static const UINT RestoreAllApp=WM_APP+5;
+static const int ResourceTimer=2, RefreshTimer=3, SingleTimer=4, ReFoldTimer=5, RestoreTimer=6;
 static HWND mainWindow=nullptr, popupWindow=nullptr, settingsWindow=nullptr, resourceWindow=nullptr;
 static HWND listWindow=nullptr, groupEdit=nullptr, foldCheck=nullptr, resourceText=nullptr;
 static HWND scopeEdit=nullptr, matchEdit=nullptr, labelSizeEdit=nullptr, labelWidthEdit=nullptr, labelHeightEdit=nullptr;
@@ -51,6 +53,8 @@ static HFONT appFont=nullptr;
 static std::wstring baseDir, configPath, recoveryPath;
 static bool foldIcons=true, shuttingDown=false, refreshing=false;
 static bool stopAfterCapture=false;
+static bool exitRequested=false;
+static unsigned restoreAttempts=0;
 static UINT taskbarCreated;
 static std::wstring activeGroup;
 static int pendingClick=-1, reFoldAttempts=0;
@@ -86,7 +90,11 @@ struct TrayItem {
     bool pending=false;
     std::wstring matchStatus;
 };
-struct Hidden { HWND toolbar, owner; UINT id; int command; RuntimeIdentity runtime; };
+struct Hidden {
+    HWND toolbar=nullptr,owner=nullptr;UINT id=0;int command=0;RuntimeIdentity runtime;
+    bool originalHidden=false;std::wstring path,ownerClass;UINT callback=0;
+    GUID guid={};bool usesGuid=false;
+};
 static std::vector<TrayItem> items;
 static std::vector<Hidden> hidden;
 static std::vector<int> popupItems;
@@ -336,71 +344,7 @@ static bool VisibleAtRuntime(const RuntimeIdentity& runtime) {
     for(const auto& item:current)if(item.runtime==runtime&&!(item.state&TBSTATE_HIDDEN))visible=true;
     FreeItems(current);return visible;
 }
-static bool WriteRecovery() {
-    std::wstring s;for(const auto& h:hidden)s+=Number((ULONG_PTR)h.owner)+L"\t"+Number(h.id)+L"\t"+Number(h.runtime.pid)+L"\t"+Number(h.runtime.started)+L"\t"+Number((ULONG_PTR)h.toolbar)+L"\n";
-    std::wstring temporary=recoveryPath+L".tmp";
-    bool ok=WriteText(temporary,s)&&MoveFileExW(temporary.c_str(),recoveryPath.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH);
-    if(!ok)LogError(L"无法写入图标恢复记录");return ok;
-}
-
-
-static bool RuntimeAlive(const RuntimeIdentity& identity);
-static void RecoverIcons() {
-    std::wstring text=ReadText(recoveryPath);std::vector<Hidden> records;size_t start=0;
-    while(start<text.size()){
-        size_t end=text.find(L'\n',start);if(end==std::wstring::npos)end=text.size();
-        std::wstring line=text.substr(start,end-start);start=end+1;std::vector<ULONG_PTR> fields;size_t at=0;
-        while(at<line.size()){fields.push_back(wcstoull(line.c_str()+at,nullptr,10));size_t tab=line.find(L'\t',at);if(tab==std::wstring::npos)break;at=tab+1;}
-        if(fields.size()<2)continue;
-        Hidden record={};record.owner=(HWND)fields[0];record.id=(UINT)fields[1];
-        if(fields.size()>=4)record.runtime={(DWORD)fields[2],(uint64_t)fields[3],record.owner,record.id};
-        if(fields.size()>=5)record.toolbar=(HWND)fields[4];records.push_back(record);
-    }
-    if(records.empty())return;auto current=ReadTrayLocations();bool failed=false;
-    for(const auto& record:records){
-        bool resolved=false;
-        for(const auto& item:current){
-            if(item.owner!=record.owner||item.id!=record.id)continue;
-            if(record.runtime.Valid()&&!(record.runtime==item.runtime))continue;
-            resolved=true;
-            if(!(item.state&TBSTATE_HIDDEN))continue;
-            bool restored=NativeVisibility(item,false);
-            // Compatibility recovery only: old builds edited toolbar state directly.
-            if(!restored&&!record.toolbar&&CommandMatches(item)){
-                DWORD_PTR result=0;restored=Send(item.toolbar,TB_HIDEBUTTON,item.command,MAKELPARAM(FALSE,0),result)&&result;
-                InvalidateRect(item.toolbar,nullptr,TRUE);
-            }
-            if(!restored||!VisibleAtRuntime(item.runtime))failed=true;
-        }
-        if(!resolved&&RuntimeAlive(record.runtime))failed=true;
-    }
-    FreeItems(current);if(!failed)DeleteFileW(recoveryPath.c_str());else LogError(L"部分图标尚未恢复，已保留恢复记录");
-}
-
-
-
-static bool RuntimeAlive(const RuntimeIdentity& identity) {
-    if(!identity.Valid()||!IsWindow(identity.owner))return false;
-    DWORD pid=0;GetWindowThreadProcessId(identity.owner,&pid);if(pid!=identity.pid)return false;
-    HANDLE process=OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION,FALSE,pid);
-    if(!process)return true; // No permission is not evidence that the original exited.
-    uint64_t started=ProcessStart(process);CloseHandle(process);return !started||started==identity.started;
-}
-static void RestoreHidden() {
-    if(hidden.empty())return;auto current=ReadTrayLocations();std::vector<Hidden> failed;
-    for(const auto& record:hidden){
-        auto item=std::find_if(current.begin(),current.end(),[&](const TrayItem& value){return value.runtime==record.runtime&&value.toolbar==record.toolbar;});
-        if(item==current.end()){
-            item=std::find_if(current.begin(),current.end(),[&](const TrayItem& value){return value.runtime==record.runtime;});
-        }
-        if(item==current.end()){if(RuntimeAlive(record.runtime))failed.push_back(record);continue;}
-        if(VisibleAtRuntime(record.runtime))continue;
-        if(!NativeVisibility(*item,false)||!VisibleAtRuntime(record.runtime))failed.push_back(record);
-    }
-    for(auto& item:items)if(std::any_of(hidden.begin(),hidden.end(),[&](const Hidden& record){return record.runtime==item.runtime;})&&std::none_of(failed.begin(),failed.end(),[&](const Hidden& record){return record.runtime==item.runtime;}))item.state&=~TBSTATE_HIDDEN;
-    FreeItems(current);hidden=failed;
-    if(hidden.empty())DeleteFileW(recoveryPath.c_str());else {WriteRecovery();LogError(L"部分图标尚未恢复，已保留恢复记录");}
-}
+#include "TrayRecovery.h"
 
 static bool OwnsHidden(const TrayItem& i) { return std::any_of(hidden.begin(),hidden.end(),[&](const Hidden& h){return h.owner==i.owner&&h.id==i.id&&h.runtime==i.runtime;}); }
 static bool CommandMatches(const TrayItem& item) {
@@ -426,19 +370,21 @@ static bool CommandMatches(const TrayItem& item) {
 
 
 static void RestoreUnassigned() {
+    if(!ImportRecovery())return;
     std::vector<Hidden> keep;
     for(const auto& record:hidden){
-        auto current=std::find_if(items.begin(),items.end(),[&](const TrayItem& item){return item.runtime==record.runtime;});
+        if(record.originalHidden)continue;
+        auto current=std::find_if(items.begin(),items.end(),[&](const TrayItem& item){return RecoveryMatches(record,item);});
         if(current==items.end()){if(RuntimeAlive(record.runtime))keep.push_back(record);continue;}
         if(!current->group.empty()&&!current->pending){keep.push_back(record);continue;}
         if(VisibleAtRuntime(record.runtime)){current->state&=~TBSTATE_HIDDEN;continue;}
         if(!NativeVisibility(*current,false)||!VisibleAtRuntime(record.runtime))keep.push_back(record);
         else current->state&=~TBSTATE_HIDDEN;
     }
-    hidden=keep;if(hidden.empty())DeleteFileW(recoveryPath.c_str());else WriteRecovery();
+    hidden=keep;WriteRecovery();
 }
 static void FoldAssigned() {
-    if(!foldIcons)return;
+    if(!foldIcons||exitRequested||shuttingDown||!ImportRecovery())return;
     // Journal exact identities before asking Explorer to hide them.
     std::vector<size_t> todo;size_t previous=hidden.size();
     for(size_t n=0;n<items.size();n++){
@@ -446,14 +392,20 @@ static void FoldAssigned() {
         if(item.group.empty()||item.pending||(item.state&TBSTATE_HIDDEN)||!CommandMatches(item))continue;
         // Applications can reveal their icon again after a click or state update.
         // Reapply the fold even when this runtime already has a recovery record.
-        if(!OwnsHidden(item))hidden.push_back({item.toolbar,item.owner,item.id,item.command,item.runtime});
+        if(!OwnsHidden(item)){
+            Hidden record={item.toolbar,item.owner,item.id,item.command,item.runtime};
+            record.path=item.path;record.ownerClass=item.ownerClass;record.callback=item.callback;
+            hidden.push_back(std::move(record));
+        }
         todo.push_back(n);
     }
     if(!todo.empty()&&!WriteRecovery()){hidden.resize(previous);return;}
+    if(!todo.empty()&&!EnsureRecoveryGuard())return;
+    std::vector<RuntimeIdentity> rejected;
     for(size_t n:todo){
         auto& item=items[n];
         if(!NativeVisibility(item,true)){
-            hidden.erase(std::remove_if(hidden.begin(),hidden.end(),[&](const Hidden& record){return record.runtime==item.runtime;}),hidden.end());
+            rejected.push_back(item.runtime);
             LogError(L"此图标不支持折叠，已保留原图标");
         }
     }
@@ -466,10 +418,14 @@ static void FoldAssigned() {
             for(const auto& current:live)if(current.runtime==item.runtime){found=true;if(!(current.state&TBSTATE_HIDDEN))visible=true;}
             if(found){if(visible)item.state&=~TBSTATE_HIDDEN;else item.state|=TBSTATE_HIDDEN;}
         }
+        hidden.erase(std::remove_if(hidden.begin(),hidden.end(),[&](const Hidden& record){
+            return std::find(rejected.begin(),rejected.end(),record.runtime)!=rejected.end()
+                &&!RecoveryStillHidden(record,live);
+        }),hidden.end());
         FreeItems(live);
     }
     // Keep all successful requests journaled, including delayed Explorer updates.
-    if(hidden.empty())DeleteFileW(recoveryPath.c_str());else WriteRecovery();
+    WriteRecovery();
 }
 
 static HICON MakeAppIcon() {
@@ -569,18 +525,57 @@ static void ShowResources() {
     resourceWindow=CreateWindowExW(WS_EX_APPWINDOW,L"Crli.TrayGroups.Resources",L"TrayGroups · 资源占用",WS_OVERLAPPED|WS_CAPTION|WS_SYSMENU,CW_USEDEFAULT,CW_USEDEFAULT,540,420,nullptr,nullptr,GetModuleHandleW(nullptr),nullptr);
     resourceText=Control(resourceWindow,L"STATIC",ResourceReport().c_str(),0,18,16,495,350,0);SetTimer(resourceWindow,ResourceTimer,1000,nullptr);ShowWindow(resourceWindow,SW_SHOW);SetForegroundWindow(resourceWindow);
 }
+static bool PersistPausedFolding(){
+    // Change only the pause flag, preserving any unapplied settings in the UI.
+    std::wstring text=ReadText(configPath),section;size_t at=0,insert=std::wstring::npos;
+    while(at<text.size()){
+        size_t end=text.find(L'\n',at);if(end==std::wstring::npos)end=text.size();
+        std::wstring line=Trim(text.substr(at,end-at));
+        if(!line.empty()&&line.front()==L'['&&line.back()==L']'){
+            section=Lower(line.substr(1,line.size()-2));if(section==L"settings")insert=std::min(end+1,text.size());
+        }else if(section==L"settings"){
+            size_t equals=line.find(L'=');
+            if(equals!=std::wstring::npos&&Lower(Trim(line.substr(0,equals)))==L"foldoriginalicons"){
+                text.replace(at,end-at,L"FoldOriginalIcons=0");return AtomicConfig(text);
+            }
+        }
+        at=end+1;
+    }
+    if(insert==std::wstring::npos)text=L"[Settings]\nFoldOriginalIcons=0\n\n"+text;
+    else text.insert(insert,L"\nFoldOriginalIcons=0\n");
+    return AtomicConfig(text);
+}
+static void ContinueRestoring(){
+    RestoreHidden();bool pending=!recoveryHealthy||!hidden.empty();
+    std::wstring status=pending?L"仍有 "+Number(hidden.size())+L" 个图标待恢复，记录已保留":L"本程序隐藏的图标已全部恢复";
+    if(!recoveryHealthy)status=L"恢复记录无法处理，文件已保留，请查看日志";
+    DebugLog::Write(L"RESTORE status="+status);
+    if(settingsWindow)SetWindowTextW(settingsWindow,(L"TrayGroups 设置 · "+status).c_str());
+    if(pending&&recoveryHealthy&&++restoreAttempts<10&&mainWindow)SetTimer(mainWindow,RestoreTimer,200,nullptr);
+    else{
+        KillTimer(mainWindow,RestoreTimer);
+        if(pending)LogError(status);
+        if(exitRequested&&!pending&&!CaptureTimer::IsBusy())DestroyWindow(mainWindow);
+    }
+}
+static void RestoreAllOwnedIcons(){
+    ClosePopup();KillTimer(mainWindow,ReFoldTimer);reFoldAttempts=0;restoreAttempts=0;
+    foldIcons=false;if(!PersistPausedFolding())LogError(L"折叠已暂停，但暂停设置未能保存");
+    ContinueRestoring();
+    if(settingsWindow){SendMessageW(foldCheck,BM_SETCHECK,BST_UNCHECKED,0);FillSettings();}
+}
 static void RootMenu() {
     DebugLog::Write(L"MENU open");ClosePopup();HMENU menu=CreatePopupMenu();
     AppendMenuW(menu,MF_STRING,1,L"设置分组…");AppendMenuW(menu,MF_STRING,2,L"资源占用");CaptureTimer::AddMenu(menu);
     AppendMenuW(menu,MF_STRING,4,L"重新加载配置并刷新");AppendMenuW(menu,MF_STRING,7,L"编辑 groups.ini 配置文件");
     AppendMenuW(menu,MF_STRING,8,L"打开本地调试日志");AppendMenuW(menu,MF_STRING|(DebugLog::enabled.load()?MF_CHECKED:0),9,L"记录本地调试日志");
-    AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING,5,L"恢复全部原图标并暂停折叠");AppendMenuW(menu,MF_STRING,6,L"退出（恢复原图标）");
+    AppendMenuW(menu,MF_SEPARATOR,0,nullptr);AppendMenuW(menu,MF_STRING,5,L"恢复本程序隐藏的全部图标");AppendMenuW(menu,MF_STRING,6,L"退出（恢复原图标）");
     POINT pt;GetCursorPos(&pt);SetForegroundWindow(mainWindow);int id=TrackPopupMenu(menu,TPM_RETURNCMD|TPM_RIGHTBUTTON,pt.x,pt.y,0,mainWindow,nullptr);DestroyMenu(menu);PostMessageW(mainWindow,WM_NULL,0,0);
     DebugLog::Write(L"MENU command="+Number(id));
     if(id==8){ShellExecuteW(mainWindow,L"open",L"notepad.exe",(L"\""+DebugLog::path+L"\"").c_str(),baseDir.c_str(),SW_SHOWNORMAL);return;}
     if(id==9){bool previous=DebugLog::enabled.load();DebugLog::Write(L"DEBUG logging disabled");DebugLog::enabled=!previous;if(!SaveSettings()){DebugLog::enabled=previous;MessageBoxW(mainWindow,L"无法保存日志开关",L"TrayGroups",MB_ICONERROR);}else DebugLog::Write(L"DEBUG logging enabled");return;}
     if(CaptureTimer::HandleMenu(id))return;
-    if(id==1)ShowSettings();else if(id==2)ShowResources();else if(id==4){RestoreHidden();LoadSettings();Refresh();if(settingsWindow)FillSettings();}else if(id==5){foldIcons=false;SaveSettings();RestoreHidden();Refresh();}else if(id==6)PostMessageW(mainWindow,StopApp,0,0);else if(id==7){std::wstring cmd=L"notepad.exe \""+configPath+L"\"";STARTUPINFOW si={};si.cb=sizeof(si);PROCESS_INFORMATION pi={};if(CreateProcessW(nullptr,&cmd[0],nullptr,nullptr,FALSE,0,nullptr,nullptr,&si,&pi)){CloseHandle(pi.hThread);CloseHandle(pi.hProcess);}}
+    if(id==1)ShowSettings();else if(id==2)ShowResources();else if(id==4){RestoreHidden();LoadSettings();Refresh();if(settingsWindow)FillSettings();}else if(id==5)RestoreAllOwnedIcons();else if(id==6)PostMessageW(mainWindow,StopApp,0,0);else if(id==7){std::wstring cmd=L"notepad.exe \""+configPath+L"\"";STARTUPINFOW si={};si.cb=sizeof(si);PROCESS_INFORMATION pi={};if(CreateProcessW(nullptr,&cmd[0],nullptr,nullptr,FALSE,0,nullptr,nullptr,&si,&pi)){CloseHandle(pi.hThread);CloseHandle(pi.hProcess);}}
 }
 static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
     if(msg==TrayCallback){
@@ -596,17 +591,26 @@ static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
     if(msg==WM_APP+8){if(w==2)RootMenu();else if(l==1){if(popupWindow)ClosePopup();else{popupPage=0;ShowGroups();}}return 0;}
     if(msg==WM_TIMER&&w==RefreshTimer){if(!popupWindow&&!settingsWindow)Refresh();return 0;}
     if(msg==WM_TIMER&&w==CaptureTimer::TimerId()){CaptureTimer::OnTimer();return 0;}
+    if(msg==WM_TIMER&&w==RestoreTimer){ContinueRestoring();return 0;}
     if(msg==WM_TIMER&&w==ReFoldTimer){
         if(!popupWindow&&!settingsWindow)Refresh();
         if(--reFoldAttempts<=0)KillTimer(h,ReFoldTimer);return 0;
     }
-    if(msg==StopApp){DebugLog::Write(L"STOP requested busy="+Number(CaptureTimer::IsBusy()));RestoreHidden();if(CaptureTimer::IsBusy()){stopAfterCapture=true;CaptureTimer::PrepareStop();return 0;}if(hidden.empty())DestroyWindow(h);else{foldIcons=false;LogError(L"退出已暂停：请先恢复剩余图标");}return 0;}
+    if(msg==StopApp){
+        DebugLog::Write(L"STOP requested busy="+Number(CaptureTimer::IsBusy()));exitRequested=true;restoreAttempts=0;
+        stopAfterCapture=CaptureTimer::IsBusy();CaptureTimer::PrepareStop();KillTimer(h,RefreshTimer);KillTimer(h,ReFoldTimer);reFoldAttempts=0;
+        ClosePopup();ContinueRestoring();return 0;
+    }
+    if(msg==WM_CLOSE){PostMessageW(h,StopApp,0,0);return 0;}
+    if(msg==RestoreAllApp){RestoreAllOwnedIcons();return 0;}
     if(msg==RefreshApp){RestoreHidden();LoadSettings();Refresh();if(settingsWindow)FillSettings();return 0;}
     if(msg==WM_COMMAND&&LOWORD(w)==1){ShowSettings();return 0;}
+    if(msg==WM_COMMAND&&LOWORD(w)==IDC_RESTORE_ALL){RestoreAllOwnedIcons();return 0;}
     if(msg==WM_COMMAND&&CaptureTimer::HandleMenu(LOWORD(w)))return 0;
     if(msg==WM_WTSSESSION_CHANGE){CaptureTimer::OnSessionChange(w);return 0;}
-    if(msg==WM_QUERYENDSESSION){if(CaptureTimer::IsBusy())return FALSE;RestoreHidden();return TRUE;}
-    if(msg==taskbarCreated){hidden.clear();notificationGroups.clear();notificationCount=0;for(auto& p:notificationIcons)DestroyIcon(p.second);notificationIcons.clear();SetTimer(h,RefreshTimer,30000,nullptr);Refresh();return 0;}
+    if(msg==WM_QUERYENDSESSION){if(CaptureTimer::IsBusy())return FALSE;exitRequested=true;RestoreHidden();return recoveryHealthy&&hidden.empty();}
+    if(msg==WM_ENDSESSION){if(!w){exitRequested=false;SetTimer(h,RefreshTimer,30000,nullptr);}return 0;}
+    if(msg==taskbarCreated){notificationGroups.clear();notificationCount=0;for(auto& p:notificationIcons)DestroyIcon(p.second);notificationIcons.clear();SetTimer(h,RefreshTimer,30000,nullptr);RecoverIcons();Refresh();return 0;}
     if(msg==WM_DESTROY){shuttingDown=true;KillTimer(h,RefreshTimer);KillTimer(h,ReFoldTimer);ClosePopup();if(settingsWindow)DestroyWindow(settingsWindow);if(resourceWindow)DestroyWindow(resourceWindow);CaptureTimer::Shutdown();WTSUnRegisterSessionNotification(h);RestoreHidden();DeleteNotifications();FreeItems(items);PostQuitMessage(0);return 0;}
     if(msg==CaptureTimer::CompletionMessage()){CaptureTimer::OnCompletion(w!=0);if(popupWindow)SetDlgItemTextW(popupWindow,CaptureStatusControl,CaptureTimer::StatusText().c_str());if(stopAfterCapture)PostMessageW(h,StopApp,0,0);return 0;}
     return DefWindowProcW(h,msg,w,l);
@@ -614,15 +618,24 @@ static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
 
 #ifndef NATIVE_TEST_BUILD
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR cmd,int) {
-    baseDir=ExePath();baseDir.resize(baseDir.find_last_of(L'\\'));configPath=baseDir+L"\\groups.ini";recoveryPath=baseDir+L"\\restore-icons.tsv";
+    baseDir=ExePath();baseDir.resize(baseDir.find_last_of(L'\\'));configPath=baseDir+L"\\groups.ini";recoveryPath=baseDir+L"\\restore-icons.ini";
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     std::wstring args=Trim(cmd?cmd:L"");
+    if(args.find(L"--recovery-watch ")==0)return RunRecoveryWatch(args.substr(17));
     HWND existing=FindWindowW(AppClass,nullptr);
     if(args==L"--stop"){if(existing)PostMessageW(existing,StopApp,0,0);return 0;}
     if(args==L"--reload"){if(existing)PostMessageW(existing,RefreshApp,0,0);return 0;}
-    if(args==L"--restore"){if(existing)PostMessageW(existing,StopApp,0,0);else RecoverIcons();return 0;}
+    if(args==L"--restore"){
+        if(existing){PostMessageW(existing,RestoreAllApp,0,0);return 0;}
+        HANDLE gate=CreateMutexW(nullptr,FALSE,L"Local\\Crli.TrayGroups.Native.Instance");DWORD acquired=gate?WaitForSingleObject(gate,10000):WAIT_FAILED;
+        if(acquired!=WAIT_OBJECT_0&&acquired!=WAIT_ABANDONED){if(gate)CloseHandle(gate);return 1;}
+        DebugLog::Initialize(baseDir);LoadSettings();foldIcons=false;PersistPausedFolding();MigrateLegacyRecovery();
+        for(unsigned attempt=0;attempt<15;attempt++){RecoverIcons();if(!recoveryHealthy||hidden.empty())break;Sleep(150);}
+        bool ok=recoveryHealthy&&hidden.empty();ReleaseMutex(gate);CloseHandle(gate);return ok?0:1;
+    }
     if(existing){if(args!=L"--background")PostMessageW(existing,WM_COMMAND,1,0);return 0;}
-    HANDLE mutex=CreateMutexW(nullptr,TRUE,L"Local\\Crli.TrayGroups.Native.Instance");if(!mutex||GetLastError()==ERROR_ALREADY_EXISTS){if(mutex)CloseHandle(mutex);return 0;}
+    HANDLE mutex=CreateMutexW(nullptr,FALSE,L"Local\\Crli.TrayGroups.Native.Instance");DWORD acquired=mutex?WaitForSingleObject(mutex,3000):WAIT_FAILED;
+    if(acquired!=WAIT_OBJECT_0&&acquired!=WAIT_ABANDONED){if(mutex)CloseHandle(mutex);return 0;}
     INITCOMMONCONTROLSEX common={sizeof(common),ICC_LISTVIEW_CLASSES|ICC_TAB_CLASSES};InitCommonControlsEx(&common);
     LOGFONTW font={};NONCLIENTMETRICSW metrics={};metrics.cbSize=sizeof(metrics);if(SystemParametersInfoW(SPI_GETNONCLIENTMETRICS,sizeof(metrics),&metrics,0))font=metrics.lfMessageFont;else{font.lfHeight=-14;wcscpy_s(font.lfFaceName,L"Microsoft YaHei UI");}appFont=CreateFontIndirectW(&font);
     appIcon=MakeAppIcon();
@@ -630,8 +643,10 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR cmd,int) {
     for(auto c:classes){WNDCLASSW wc={};wc.lpfnWndProc=c.proc;wc.hInstance=instance;wc.lpszClassName=c.name;wc.hCursor=LoadCursorW(nullptr,IDC_ARROW);wc.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);wc.style=c.style;wc.hIcon=appIcon;RegisterClassW(&wc);}
     taskbarCreated=RegisterWindowMessageW(L"TaskbarCreated");DebugLog::Initialize(baseDir);LoadSettings();
     DebugLog::Write(L"START version=" TRAYGROUPS_VERSION_W L" exe="+ExePath()+L" config="+configPath);
-    if(GetFileAttributesW(configPath.c_str())==INVALID_FILE_ATTRIBUTES)SaveSettings();RecoverIcons();mainWindow=CreateWindowExW(WS_EX_TOOLWINDOW,AppClass,L"TrayGroups 托盘分组器",WS_POPUP,0,0,0,0,nullptr,nullptr,instance,nullptr);
-    if(!mainWindow){CloseHandle(mutex);return 1;}ShowWindow(mainWindow,SW_HIDE);CaptureTimer::Initialize(mainWindow,instance,baseDir);WTSRegisterSessionNotification(mainWindow,NOTIFY_FOR_THIS_SESSION);Refresh();SetTimer(mainWindow,RefreshTimer,30000,nullptr);if(args!=L"--background")ShowSettings();
+    if(GetFileAttributesW(configPath.c_str())==INVALID_FILE_ATTRIBUTES)SaveSettings();MigrateLegacyRecovery();RecoverIcons();mainWindow=CreateWindowExW(WS_EX_TOOLWINDOW,AppClass,L"TrayGroups 托盘分组器",WS_POPUP,0,0,0,0,nullptr,nullptr,instance,nullptr);
+    if(!mainWindow){CloseHandle(mutex);return 1;}ShowWindow(mainWindow,SW_HIDE);CaptureTimer::Initialize(mainWindow,instance,baseDir);WTSRegisterSessionNotification(mainWindow,NOTIFY_FOR_THIS_SESSION);
+    if(!hidden.empty()){foldIcons=false;EnsureRecoveryGuard();SetTimer(mainWindow,RestoreTimer,200,nullptr);}
+    Refresh();SetTimer(mainWindow,RefreshTimer,30000,nullptr);if(args!=L"--background")ShowSettings();
     MSG msg;while(GetMessageW(&msg,nullptr,0,0)>0){if(settingsWindow&&IsDialogMessageW(settingsWindow,&msg))continue;TranslateMessage(&msg);DispatchMessageW(&msg);}
     if(appFont)DeleteObject(appFont);if(appIcon)DestroyIcon(appIcon);ReleaseMutex(mutex);CloseHandle(mutex);return 0;
 }

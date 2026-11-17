@@ -88,6 +88,7 @@ static int SelfTest() {
         MainProc(h,StopApp,0,0);
         if(hidden.empty()||!IsWindow(h)||GetFileAttributesW(recoveryPath.c_str())==INVALID_FILE_ATTRIBUTES){pass=false;failures+=L"Exit lost unresolved recovery record\n";}
         checks++;hidden.clear();DeleteFileW(recoveryPath.c_str());foldIcons=true;
+        KillTimer(mainWindow,RestoreTimer);exitRequested=false;stopAfterCapture=false;CaptureTimer::stopRequested=false;
     }
     auto savedAssignments=assignments;auto savedPrograms=programAssignments;auto savedPaths=pathAssignments;
     assignments.clear();programAssignments.clear();pathAssignments.clear();pendingRules.clear();ruleBindings.clear();
