@@ -114,7 +114,11 @@ Windows 托盘隐藏/恢复接口对部分系统图标需要真实 GUID；这是
 
 运行 `build.ps1` 构建 TrayGroups 单一程序。截图编码和测试代码保留在 `ScreenCaptureTimer/` 子目录。运行 `test/run-all.ps1` 执行两套测试。
 
-推送 `v*` 标签会通过 GitHub Actions 构建 Windows 便携包并创建 Release。Release 需要仓库允许 Actions 的 `GITHUB_TOKEN` 写入内容。
+每次推送到 `main` 都会通过 GitHub Actions 自动构建、测试并打包，在对应运行页面的 Artifacts 中提供 Windows 便携包；也支持在 Actions 页面手动运行。推送 `v*` 标签时会额外自动创建 Release 并上传便携包。Release 需要仓库允许 Actions 的 `GITHUB_TOKEN` 写入内容。
+
+发布约定：每次完成 bug 修复或新增功能，都必须递增版本号、验证后提交，并为该提交创建及推送 `v版本号` 标签，触发自动构建和 Release。bug 修复递增补丁版本（例如 `v1.1.1`），新增功能递增次版本（例如 `v1.2.0`）；EXE 版本资源、启动日志和托盘提示中的版本号须同步。标签发布后不覆盖或复用，后续修复使用新版本。仅推送 `main` 不算完成上述发布流程。
+
+例如本次版本：提交后执行 `git tag -a v1.1.1 -m "TrayGroups v1.1.1"`，再执行 `git push origin main v1.1.1`，最后确认 Actions 成功且 Release 的便携包可下载。
 
 ## 本地调试日志
 

@@ -1,4 +1,4 @@
-name: Windows Release
+name: Windows Build and Release
 
 on:
   push:
@@ -6,19 +6,16 @@ on:
       - main
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
-  release:
-    if: >-
-      github.ref_type == 'tag' ||
-      (github.ref == 'refs/heads/main' &&
-       github.event.head_commit.message == 'Add automatic GitHub release workflow')
+  build:
     runs-on: windows-latest
     env:
-      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'v1.0.0' }}
+      RELEASE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'main' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -48,7 +45,15 @@ jobs:
           Copy-Item test\build\TrayGroups.exe, README.md -Destination $stage
           Compress-Archive -Path (Join-Path $stage '*') -DestinationPath "test\build\TrayGroups-$env:RELEASE_TAG-windows-x64.zip" -Force
 
+      - name: Upload portable build
+        uses: actions/upload-artifact@v4
+        with:
+          name: TrayGroups-${{ env.RELEASE_TAG }}-windows-x64
+          path: test/build/TrayGroups-${{ env.RELEASE_TAG }}-windows-x64.zip
+          if-no-files-found: error
+
       - name: Publish release
+        if: github.ref_type == 'tag'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ env.RELEASE_TAG }}
