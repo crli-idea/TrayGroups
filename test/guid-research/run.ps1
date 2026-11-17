@@ -7,7 +7,7 @@ if (-not (Test-Path (Join-Path $mingwBin 'g++.exe'))) {
 $output = Join-Path $PSScriptRoot '..\build\guid-research'
 New-Item -ItemType Directory -Path $output -Force | Out-Null
 $binary = Join-Path $output 'guid-probe.exe'
-& (Join-Path $mingwBin 'g++.exe') -std=c++17 -Os -g -static -fno-exceptions -fno-rtti -municode -mwindows -Wall -Wextra -o $binary "$PSScriptRoot\guid-probe.cpp" "$PSScriptRoot\TrayNotifySnapshot.cpp" -lole32 -luuid -luser32 -lshell32
+& (Join-Path $mingwBin 'g++.exe') -std=c++17 -Os -g -static -fno-exceptions -fno-rtti -municode -mwindows -Wall -Wextra -o $binary "$PSScriptRoot\guid-probe.cpp" "$PSScriptRoot\..\..\src\tray\TrayGuid.cpp" -lole32 -luuid -luser32 -lshell32
 if ($LASTEXITCODE -ne 0) { throw 'GUID probe build failed.' }
 $report = Join-Path $output 'com-snapshot.txt'
 Set-Content -LiteralPath $report -Value 'Probe has not completed yet.' -Encoding UTF8

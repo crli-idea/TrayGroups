@@ -83,6 +83,7 @@ static void FillSettings() {
         std::wstring status = i.matchStatus;
         if (!i.group.empty() && !i.pending)
             status += !settingsConfig.foldIcons    ? L"；折叠已暂停"
+                      : !i.addressKnown            ? L"；未取得注册信息，保持原状"
                       : (i.state & TBSTATE_HIDDEN) ? L"；已隐藏"
                                                    : L"；仍显示在 Windows";
         ListView_SetItemText(listWindow, n, 5, (LPWSTR)status.c_str());

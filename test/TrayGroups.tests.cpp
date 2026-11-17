@@ -110,8 +110,10 @@ static int SelfTest() {
     FreeItems(items);FreeItems(own);Shell_NotifyIconW(NIM_DELETE,&a);Shell_NotifyIconW(NIM_DELETE,&b);testingOwnIcons=false;
     // Round-trip Unicode group assignments, stable keys, and removal.
     WriteText(baseDir+L"\\test-progress.txt",L"configuration round-trip\n");
-    auto original=settingsConfig.assignments;std::wstring oldConfig=configPath;configPath=baseDir+L"\\test-groups.tmp";settingsConfig.assignments={{L"c:\\tools\\network.exe|2",L"网络"},{L"c:\\tools\\notes.exe|0",L"工具"}};
+    auto original=settingsConfig.assignments;std::wstring oldConfig=configPath;configPath=baseDir+L"\\test-groups.tmp";
     TrayItem network;network.path=L"c:\\tools\\network.exe";network.process=L"network.exe";network.id=2;
+    TrayItem notes=network;notes.path=L"c:\\tools\\notes.exe";notes.id=0;
+    settingsConfig.assignments={{IconKey(network,settingsConfig.iconMatch),L"网络"},{IconKey(notes,settingsConfig.iconMatch),L"工具"}};
     bool folded=settingsConfig.foldIcons;settingsConfig.foldIcons=false;if(!SaveSettings())pass=false;settingsConfig.assignments.clear();LoadSettings();if(settingsConfig.assignments.size()!=2||matcher.GroupFor(network)!=L"网络"||settingsConfig.foldIcons)pass=false;
     DeleteFileW(configPath.c_str());settingsConfig.assignments=original;configPath=oldConfig;settingsConfig.foldIcons=folded;checks++;
 
@@ -134,7 +136,7 @@ static bool IdentityRegression(std::wstring& report) {
     HMENU captureMenu=CreatePopupMenu();CaptureTimer::AddMenu(captureMenu);
     check(GetMenuItemCount(captureMenu)==1&&GetMenuItemCount(GetSubMenu(captureMenu,0))==7,L"scheduled capture is available as a submenu without another tray entry");DestroyMenu(captureMenu);
     auto previousConfig=configPath;configPath=baseDir+L"\\default-identity.ini";DeleteFileW(configPath.c_str());LoadSettings();
-    check(settingsConfig.iconMatch==L"path-class-id",L"new configuration defaults to full-path, stable-window-class, and icon-ID identity");
+    check(settingsConfig.iconMatch==L"path-guid",L"new configuration defaults to full-path and actual GUID identity");
     configPath=previousConfig;settingsConfig.iconMatch=L"path-class-id";
     configPath=baseDir+L"\\identity-config.ini";settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();settingsConfig.groupLabelSizes.clear();settingsConfig.groupLabelWidths.clear();settingsConfig.groupLabelHeights.clear();settingsConfig.iconMatch=L"path-class-id";
     TrayItem a;a.process=L"explorer.exe";a.path=L"C:\\Windows\\explorer.exe";a.ownerClass=L"BluetoothNotificationAreaIconWindowClass";a.id=0;a.tip=L"蓝牙设备";
@@ -150,7 +152,8 @@ static bool IdentityRegression(std::wstring& report) {
         L"Explorer volume and Bluetooth icons have distinct path, window-class, and icon-ID fallback identities");
     TrayItem systemAudio=a;systemAudio.ownerClass=L"atl@sndvolsso.dll";systemAudio.group=L"";
     TrayItem systemBluetooth=a;systemBluetooth.ownerClass=L"BluetoothNotificationAreaIconWindowClass";systemBluetooth.group=L"";
-    check(FriendlyIconName(systemAudio)==L"系统音量"&&FriendlyIconName(systemBluetooth)==L"蓝牙设备",L"system icon names are readable in settings");
+    systemAudio.tip=L"原程序音量提示";systemBluetooth.tip=L"原程序蓝牙提示";
+    check(FriendlyIconName(systemAudio)==systemAudio.tip&&FriendlyIconName(systemBluetooth)==systemBluetooth.tip,L"labels use application tips without name tables");
     systemAudio.group=L"音量";
     auto changing=b;changing.tip=L"耳机: 87%";changing.owner=(HWND)0x1234;check(matcher.GroupFor(changing)==L"音量",L"dynamic tooltip and window handle do not affect default identity");
     a.ownerClass=L"ATL:0000ABCD";b=a;b.ownerClass=L"ATL:0000DEF0";check(IconKey(a,settingsConfig.iconMatch)==IconKey(b,settingsConfig.iconMatch),L"process-specific ATL addresses normalized");
@@ -165,11 +168,11 @@ static bool IdentityRegression(std::wstring& report) {
     check(matcher.GroupFor(c)==L"独立路径"&&matcher.GroupFor(a).empty(),L"full-path grouping does not affect same filename elsewhere");
     settingsConfig.iconMatch=L"path-id";settingsConfig.assignments[IconKey(c,settingsConfig.iconMatch)]=L"按ID";
     settingsConfig.iconMatch=L"path-class-tip";settingsConfig.assignments[IconKey(a,settingsConfig.iconMatch)]=L"按提示";
-    check(matcher.GroupFor(c)==L"按ID"&&matcher.GroupFor(a)==L"按提示",L"previous matching modes remain valid after changing the default");
+    check(matcher.GroupFor(c)==L"独立路径"&&matcher.GroupFor(a)==L"按提示",L"only the selected naming mode applies");
     a.path=L"C:\\test=folder\\explorer.exe";a.tip=L"Name=first|second\nnext";auto escaped=IconKey(a,settingsConfig.iconMatch);settingsConfig.assignments[escaped]=L"转义";
     check(escaped.find(L'=')==std::wstring::npos&&RulePath(escaped)==Lower(a.path),L"INI delimiters and multiline tooltip escaped without changing the saved path");
     settingsConfig.groupLabelSizes[L"连接"]=9;settingsConfig.groupLabelSizes[L"音量"]=24;settingsConfig.settingsX=-500;settingsConfig.settingsY=80;settingsConfig.haveSettingsPosition=true;
-    settingsConfig.assignments[IconKey(c,L"path-class-id")]=L"";
+    settingsConfig.assignments[IconKey(c,settingsConfig.iconMatch)]=L"";
     bool saved=SaveSettings();settingsConfig.assignments.clear();settingsConfig.pathAssignments.clear();settingsConfig.groupLabelSizes.clear();settingsConfig.groupLabelWidths.clear();settingsConfig.groupLabelHeights.clear();LoadSettings();
     check(saved&&settingsConfig.assignments.count(escaped)&&matcher.GroupFor(c).empty()&&settingsConfig.GroupLabelSize(L"连接")==9&&settingsConfig.GroupLabelSize(L"音量")==24&&settingsConfig.haveSettingsPosition&&settingsConfig.settingsX==-500&&settingsConfig.settingsY==80&&settingsConfig.iconMatch==L"path-class-tip",L"INI round-trip: identities, explicit exclusions, paths, per-group sizes and negative window coordinates");
     WriteText(configPath,ReadText(configPath)+L"\n[Unknown]\nValue=keep\n");
@@ -189,7 +192,7 @@ static bool IdentityRegression(std::wstring& report) {
     matcher.ForgetRule(key);settingsConfig.assignments[key]=L"\u5df2\u786e\u8ba4";live={second};matcher.ResolveGroups(live);
     check(!live[0].pending&&live[0].group==L"\u5df2\u786e\u8ba4",L"explicit reselection confirms a recreated icon");
     settingsConfig.assignments[IconKey(second,L"path-id")]=L"\u53e6\u4e00\u7ec4";live={second};matcher.ResolveGroups(live);
-    check(live[0].pending&&live[0].group.empty(),L"conflicting saved selectors block matching instead of choosing precedence");
+    check(!live[0].pending&&live[0].group==L"\u5df2\u786e\u8ba4",L"inactive naming modes do not compete with the current selector");
     matchState.pendingRules.clear();matchState.ruleBindings.clear();settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();
 
     WriteText(baseDir+L"\\identity-self-test.txt",report);return ok;
@@ -299,32 +302,19 @@ static bool HiddenPopupRegression(std::wstring& report) {
 static bool GuidRegression(std::wstring& report) {
     bool ok=true;auto check=[&](bool passed,const wchar_t* label){report+=(passed?L"PASS: ":L"FAIL: ")+std::wstring(label)+L"\n";if(!passed)ok=false;};
     auto previousRecovery=recoveryPath;recoveryPath=baseDir+L"\\guid-test-restore.tsv";
-    auto actual=ReadTray();bool securityFound=false;
-    for(const auto& item:actual)if(Lower(item.process)==L"securityhealthsystray.exe"){
-        GUID guid={};securityFound=true;check(ResolveIconGuid(item,guid)&&item.usesGuid,L"actual Windows Security executable path and class resolve to its verified notification GUID");
-        TrayItem wrong=item;wrong.path=L"C:\\Other\\SecurityHealthSystray.exe";check(!ResolveIconGuid(wrong,guid),L"same executable name outside the system directory cannot claim the Security icon GUID");
-    }
-    report+=securityFound?L"Windows Security GUID runtime identification checked.\n":L"Windows Security icon unavailable for runtime identification.\n";
-    for(const auto& item:actual)if(Lower(item.process)==L"explorer.exe"&&(StableClass(item.ownerClass)==L"atl@sndvolsso.dll"||StableClass(item.ownerClass)==L"bluetoothnotificationareaiconwindowclass")){
-        GUID guid={};check(ResolveIconGuid(item,guid)&&item.usesGuid,L"actual Bluetooth or volume icon resolves its verified system GUID");
-        TrayItem hiddenCopy=item;hiddenCopy.state|=TBSTATE_HIDDEN;
-        GUID hiddenGuid={};check(ResolveIconGuid(hiddenCopy,hiddenGuid)&&!memcmp(&guid,&hiddenGuid,sizeof(GUID)),L"system GUID identity remains available when its icon is hidden");
-
-        auto changed=item;changed.path=L"D:\\\\fake\\\\explorer.exe";check(!ResolveIconGuid(changed,guid),L"non-system explorer executable cannot claim Bluetooth or volume GUID");
+    auto actual=ReadTray();auto snapshot=TrayGuid::ReadSnapshot();
+    for(const auto& item:actual)if(item.usesGuid&&!(item.state&TBSTATE_HIDDEN)){
+        GUID resolved={};check(TrayGuid::FindLiveGuid(snapshot,item.owner,item.id,item.path,resolved)&&IsEqualGUID(resolved,item.guid),L"live GUID comes from generic Explorer metadata");
+        check(!TrayGuid::FindLiveGuid(snapshot,item.owner,item.id,item.path+L".wrong",resolved),L"wrong executable path cannot claim a live GUID");
     }
     FreeItems(actual);
     bool oldFold=settingsConfig.foldIcons;settingsConfig.foldIcons=true;testingOwnIcons=true;
     settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();matchState.pendingRules.clear();matchState.ruleBindings.clear();
-    GUID guid={0x58c7a6be,0x6134,0x4c73,{0xb6,0x24,0x82,0x22,0xce,0x53,0xb4,0x19}};
-    // Explorer 将 GUID 图标与 EXE 路径关联。测试移到 build/ 后不能复用旧路径的
-    // 固定 GUID；按当前路径派生测试标识，正式程序的身份规则不受影响。
-    uint64_t executableHash=14695981039346656037ULL;
-    for(wchar_t c:Lower(ExePath())){executableHash^=(uint16_t)c;executableHash*=1099511628211ULL;}
-    guid.Data1^=(DWORD)executableHash;guid.Data2^=(WORD)(executableHash>>32);guid.Data3^=(WORD)(executableHash>>48);
+    GUID guid={};check(SUCCEEDED(CoCreateGuid(&guid)),L"generate random GUID without a program lookup");
+    settingsConfig.iconMatch=L"path-guid";
     NOTIFYICONDATAW icon={};icon.cbSize=sizeof(icon);icon.hWnd=mainWindow;icon.uID=703;icon.guidItem=guid;
     icon.uFlags=NIF_GUID|NIF_ICON|NIF_TIP|NIF_MESSAGE;icon.hIcon=LoadIconW(nullptr,IDI_INFORMATION);icon.uCallbackMessage=ActCallback;
     wcscpy_s(icon.szTip,L"TrayGroups GUID hiding regression");
-    testIconGuids[{mainWindow,703}]=guid;
     SetLastError(ERROR_SUCCESS);bool added=Shell_NotifyIconW(NIM_ADD,&icon)!=FALSE;DWORD addError=added?ERROR_SUCCESS:GetLastError();icon.uVersion=4;Shell_NotifyIconW(NIM_SETVERSION,&icon);
     FreeItems(items);items=ReadTray();TrayItem identity;bool found=false;
     for(const auto& item:items)if(item.owner==mainWindow&&item.id==703){identity=item;identity.image=nullptr;found=true;}
@@ -341,7 +331,7 @@ static bool GuidRegression(std::wstring& report) {
         changed=identity;changed.usesGuid=false;
         check(IconKey(changed,L"path-guid")==IconKey(changed,L"path-class-id"),L"missing GUID falls back to existing path class and numeric ID instead of inventing one");
         settingsConfig.assignments[IconKey(identity,L"path-class-id")]=L"GUID group";
-        matcher.ResolveGroups(items);check(matcher.GroupFor(identity)==L"GUID group",L"existing per-icon rules continue matching GUID-aware icons");
+        matcher.ResolveGroups(items);check(matcher.GroupFor(identity).empty(),L"old class-id rules are not aliases for the default GUID key");
         settingsConfig.assignments.clear();settingsConfig.iconMatch=L"path-guid";settingsConfig.assignments[key]=L"GUID group";
         auto oldConfig=configPath;configPath=baseDir+L"\\guid-identity.ini";
         bool saved=SaveSettings();settingsConfig.assignments.clear();LoadSettings();
@@ -361,7 +351,7 @@ static bool GuidRegression(std::wstring& report) {
         hidden.clear();RecoverIcons();
         check(VisibleAtRuntime(identity.runtime)&&GetFileAttributesW(recoveryPath.c_str())==INVALID_FILE_ATTRIBUTES,L"GUID icon restores from persisted journal after in-memory state is lost");
     }
-    RestoreHidden();Shell_NotifyIconW(NIM_DELETE,&icon);testIconGuids.erase({mainWindow,703});
+    RestoreHidden();Shell_NotifyIconW(NIM_DELETE,&icon);
     FreeItems(items);testingOwnIcons=false;settingsConfig.foldIcons=oldFold;recoveryPath=previousRecovery;
     settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();matchState.pendingRules.clear();matchState.ruleBindings.clear();LoadSettings();
     return ok;
@@ -468,7 +458,7 @@ static int UiSelfTest() {
     popupPage=0;ShowGroups();
     check(std::find(popupGroups.begin(),popupGroups.end(),L"")==popupGroups.end()&&!activeGroup.empty(),L"T popup omits ungrouped and chooses a named group");
     TrayItem visibleRow;visibleRow.group=L"Named";
-    TrayItem hiddenRow=visibleRow;hiddenRow.state=TBSTATE_HIDDEN;
+    TrayItem hiddenRow=visibleRow;hiddenRow.state=TBSTATE_HIDDEN;hiddenRow.addressKnown=true;
     TrayItem ungroupedRow=hiddenRow;ungroupedRow.group.clear();
     TrayItem pendingRow=hiddenRow;pendingRow.pending=true;
     check(!PopupEligible(visibleRow)&&PopupEligible(hiddenRow)&&!PopupEligible(ungroupedRow)&&!PopupEligible(pendingRow),L"popup includes only hidden named-group icons, excluding visible, ungrouped and uncertain icons");
@@ -485,7 +475,7 @@ static int UiSelfTest() {
         RECT r=groupRects[target];SendMessageW(popupWindow,WM_LBUTTONUP,0,MAKELPARAM(r.left+10,r.top+10));MSG m;while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}
         check(popupWindow&&showingGroups&&activeGroup==L"路径分组"&&popupItemTop>groupRects.back().bottom,L"group list remains above the selected group's icon view");
     }
-    TrayItem extra;extra.process=L"sample.exe";extra.group=activeGroup;extra.owner=mainWindow;extra.state=TBSTATE_HIDDEN;
+    TrayItem extra;extra.process=L"sample.exe";extra.group=activeGroup;extra.owner=mainWindow;extra.state=TBSTATE_HIDDEN;extra.addressKnown=true;
     for(int i=0;i<20;i++){extra.id=i+100;items.push_back(extra);}
     popupItemPage=0;FillPopupItems(activeGroup);
     check(popupItemPages>1&&popupItems.size()==(size_t)popupItemPageSize,L"overflowing group icons have a first page");

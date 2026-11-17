@@ -21,6 +21,7 @@
 #include "../common/TraySupport.h"
 #include "../config/TrayConfig.h"
 #include "../tray/TrayIdentity.h"
+#include "../tray/TrayGuid.h"
 #include "AppLifecycle.h"
 using namespace TraySupport;
 using TrayConfig::LabelSize;
@@ -77,7 +78,6 @@ static std::map<UINT, HICON> notificationIcons;
 static std::wstring latestError;
 #ifdef NATIVE_TEST_BUILD
 static bool testingOwnIcons = false;
-static std::map<std::pair<HWND, UINT>, GUID> testIconGuids;
 #endif
 
 static std::vector<TrayItem> items;
@@ -159,42 +159,19 @@ static void FreeItems(std::vector<TrayItem> &list) {
             DestroyIcon(i.image);
     list.clear();
 }
-static bool ResolveIconGuid(const TrayItem &item, GUID &guid) {
-    // 这些是 Windows 状态接口需要的系统 GUID，不参与默认的通用分组命名规则。
-    // 必须同时验证系统目录、窗口类别和图标编号，避免同名外部程序被误识别。
-#ifdef NATIVE_TEST_BUILD
-    auto test = testIconGuids.find({item.owner, item.id});
-    if (test != testIconGuids.end()) {
-        guid = test->second;
-        return true;
-    }
-#endif
-    wchar_t system[MAX_PATH] = {};
-    GetSystemDirectoryW(system, MAX_PATH);
-    std::wstring systemPath = Lower(system), path = Lower(item.path),
-                 cls = StableClass(item.ownerClass);
-    GUID security = {};
-    if (path == systemPath + L"\\securityhealthsystray.exe" &&
-        cls == L"atl@securityhealthsso.dll" && item.id == 100)
-        security = {0xba82e2dc, 0xf405, 0x47ad, {0xb0, 0x32, 0xcf, 0x0f, 0xaa, 0x0e, 0x39, 0x33}};
-    else {
-        size_t slash = systemPath.find_last_of(L'\\');
-        std::wstring explorer = systemPath.substr(0, slash) + L"\\explorer.exe";
-        if (path != explorer)
-            return false;
-        if (cls == L"atl@sndvolsso.dll" && item.id == 100)
-            security = {
-                0x7820ae73, 0x23e3, 0x4229, {0x82, 0xc1, 0xe4, 0x1c, 0xb6, 0x7d, 0x5b, 0x9c}};
-        else if (cls == L"bluetoothnotificationareaiconwindowclass" && item.id == 0)
-            security = {
-                0x6da68f06, 0x00f1, 0x4e6e, {0x81, 0x58, 0x7f, 0x1f, 0xfd, 0x4f, 0x9d, 0xb9}};
-        else
-            return false;
-    }
-    // Hidden icons may have no rectangle. Keep their verified GUID available
-    // for persisted matching and restoration while they are hidden.
-    guid = security;
-    return true;
+static bool RecoveryMatches(const Hidden &record, const TrayItem &item);
+static void ResolveTrayGuids(std::vector<TrayItem> &list) {
+    TrayGuid::Resolve(list);
+    // NIS_HIDDEN 图标不在新的 COM 快照中；只从本程序落盘的同一运行时记录补回地址。
+    for (auto &item : list)
+        if (!item.addressKnown && (item.state & TBSTATE_HIDDEN))
+            for (const auto &record : hidden)
+                if (RecoveryMatches(record, item)) {
+                    item.usesGuid = record.usesGuid;
+                    item.guid = record.guid;
+                    item.addressKnown = true;
+                    break;
+                }
 }
 #include "../tray/TrayEnumeration.h"
 
@@ -203,13 +180,20 @@ static bool NativeVisibility(const TrayItem &item, bool hide) {
     auto current = ReadTrayLocations();
     bool valid = false, usesGuid = false;
     GUID guid = {};
-    for (const auto &live : current)
+    for (auto &live : current) {
+        // 调用者刚取得的地址也可用于恢复，适用于未经过分组的独立显隐操作。
+        if (!live.addressKnown && item.addressKnown && (live.state & TBSTATE_HIDDEN)) {
+            live.guid = item.guid;
+            live.usesGuid = item.usesGuid;
+            live.addressKnown = true;
+        }
         if (SameRuntime(item, live)) {
-            valid = true;
+            valid = live.addressKnown;
             usesGuid = live.usesGuid;
             guid = live.guid;
             break;
         }
+    }
     FreeItems(current);
     if (!valid)
         return false;
@@ -238,9 +222,8 @@ static bool VisibleAtRuntime(const RuntimeIdentity &runtime) {
 #include "../tray/TrayRecovery.h"
 
 static bool OwnsHidden(const TrayItem &i) {
-    return std::any_of(hidden.begin(), hidden.end(), [&](const Hidden &h) {
-        return h.owner == i.owner && h.id == i.id && h.runtime == i.runtime;
-    });
+    return std::any_of(hidden.begin(), hidden.end(),
+                       [&](const Hidden &h) { return RecoveryMatches(h, i); });
 }
 static bool CommandMatches(const TrayItem &item) {
     DWORD pid = 0;
@@ -312,25 +295,32 @@ static void FoldAssigned() {
         return;
     // Journal exact identities before asking Explorer to hide them.
     std::vector<size_t> todo;
-    size_t previous = hidden.size();
+    const auto previous = hidden;
     for (size_t n = 0; n < items.size(); n++) {
         auto &item = items[n];
-        if (item.group.empty() || item.pending || (item.state & TBSTATE_HIDDEN) ||
-            !CommandMatches(item))
+        if (item.group.empty() || item.pending || !item.addressKnown ||
+            (item.state & TBSTATE_HIDDEN) || !CommandMatches(item))
             continue;
         // Applications can reveal their icon again after a click or state update.
         // Reapply the fold even when this runtime already has a recovery record.
         if (!OwnsHidden(item)) {
+            // 同一窗口/编号可以重新注册另一个 GUID；当前已确认可见时，不能沿用旧地址。
+            hidden.erase(std::remove_if(
+                             hidden.begin(), hidden.end(),
+                             [&](const Hidden &record) { return record.runtime == item.runtime; }),
+                         hidden.end());
             Hidden record = {item.toolbar, item.owner, item.id, item.command, item.runtime};
             record.path = item.path;
             record.ownerClass = item.ownerClass;
             record.callback = item.callback;
+            record.guid = item.guid;
+            record.usesGuid = item.usesGuid;
             hidden.push_back(std::move(record));
         }
         todo.push_back(n);
     }
     if (!todo.empty() && !WriteRecovery()) {
-        hidden.resize(previous);
+        hidden = previous;
         return;
     }
     if (!todo.empty() && !EnsureRecoveryGuard())

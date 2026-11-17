@@ -83,6 +83,21 @@ int main() {
     separate.ResolveGroups(list);
     Check(!list[0].pending&&list[0].group==L"重新确认",
           "explicit reselection confirms a recreated icon through the module API");
+    TrayItem guidIcon=icon;
+    guidIcon.usesGuid=true;guidIcon.addressKnown=true;
+    guidIcon.guid={0x12345678,0x1234,0x5678,{1,2,3,4,5,6,7,8}};
+    loaded.iconMatch=L"path-guid";loaded.assignments.clear();
+    loaded.assignments[TrayIdentity::IconKey(guidIcon,loaded.iconMatch)]=L"GUID";
+    TrayIdentity::MatchState guidState;
+    TrayIdentity::Matcher guidMatcher(loaded,guidState);
+    list={guidIcon};guidMatcher.ResolveGroups(list);
+    guidIcon.owner=(HWND)202;guidIcon.runtime.owner=guidIcon.owner;guidIcon.runtime.started++;
+    list={guidIcon};guidMatcher.ResolveGroups(list);
+    Check(!list[0].pending&&list[0].group==L"GUID",
+          "same path and real GUID can rebind after window or process recreation");
+    guidIcon.guid.Data1++;list={guidIcon};guidMatcher.ResolveGroups(list);
+    Check(list[0].group==L"整路径",
+          "a changed GUID does not inherit the earlier per-icon assignment");
     DeleteFileW(path.c_str());
     return passed?0:1;
 }

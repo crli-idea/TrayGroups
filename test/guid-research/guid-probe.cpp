@@ -245,8 +245,8 @@ void SelfTest(HINSTANCE instance, const Snapshot &before) {
 int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR commandLine, int) {
     SetUnhandledExceptionFilter(FailureReport);
     HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
-    report =
-        L"Explorer GUID discovery research; no production changes\nCOM=" + Hex(initialized) + L"\n";
+    report = L"Explorer GUID discovery; isolated tests of production resolver\nCOM=" +
+             Hex(initialized) + L"\n";
     report += L"arguments=[" + std::wstring(commandLine) + L"]\n";
     if (SUCCEEDED(initialized)) {
         {

@@ -51,11 +51,18 @@ template<class Check> static void CheckTrayScanning(Check check,std::wstring& re
 template<class Check> static void CheckRecoveryJournal(Check check){
     std::wstring previous=recoveryPath;recoveryPath=baseDir+L"\\durable-recovery.ini";hidden.clear();
     Hidden record;record.owner=mainWindow;record.id=62100;record.runtime={GetCurrentProcessId(),ProcessStart(GetCurrentProcess()),mainWindow,record.id};
+    record.usesGuid=SUCCEEDED(CoCreateGuid(&record.guid));
     hidden={record};bool wrote=WriteRecovery();hidden.clear();RestoreHidden();
     check(wrote&&hidden.size()==1&&!ReadText(recoveryPath).empty(),L"disk ownership journal survives memory loss and an unenumerated live icon");
     RestoreUnassigned();FoldAssigned();
     check(hidden.size()==1&&!ReadText(recoveryPath).empty(),L"refresh preserves a pending disk recovery record");
     std::vector<Hidden> parsed;check(ReadRecoveryFile(recoveryPath,parsed)&&parsed.size()==1&&!parsed[0].originalHidden,L"readable recovery INI retains the original visibility state");
+    check(parsed.size()==1&&parsed[0].usesGuid&&IsEqualGUID(parsed[0].guid,record.guid),L"real GUID survives recovery serialization and memory loss");
+    std::wstring complete=ReadText(recoveryPath),broken=complete;
+    size_t guidAt=broken.find(L"Guid=");
+    if(guidAt!=std::wstring::npos){size_t end=broken.find(L'\n',guidAt);broken.erase(guidAt,end==std::wstring::npos?broken.size()-guidAt:end-guidAt+1);}
+    WriteText(recoveryPath,broken);parsed.clear();check(!ReadRecoveryFile(recoveryPath,parsed),L"version 3 journal missing GUID field is rejected rather than treated as window-addressed");
+    WriteText(recoveryPath,complete);
     hidden.clear();DeleteFileW(recoveryPath.c_str());
     std::wstring corrupt=L"[Recovery]\nVersion=2\n[Icon1]\nIconId=62100\n";WriteText(recoveryPath,corrupt);RestoreHidden();
     check(!recoveryHealthy&&ReadText(recoveryPath)==corrupt,L"invalid ownership journals are preserved rather than overwritten");
@@ -75,7 +82,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int){
     CheckTrayScanning(check,report);
     CheckRecoveryJournal(check);
     std::wstring originalConfig=configPath;configPath=baseDir+L"\\..\\..\\..\\defaults\\groups.ini";LoadSettings();
-    check(!ReadText(configPath).empty()&&settingsConfig.assignments.empty()&&settingsConfig.pathAssignments.empty()&&settingsConfig.programAssignments.empty()&&settingsConfig.iconMatch==L"path-class-id"&&settingsConfig.foldIcons,L"shipped INI loads portable defaults without personal grouping rules");configPath=originalConfig;
+    check(!ReadText(configPath).empty()&&settingsConfig.assignments.empty()&&settingsConfig.pathAssignments.empty()&&settingsConfig.programAssignments.empty()&&settingsConfig.iconMatch==L"path-guid"&&settingsConfig.foldIcons,L"shipped INI loads portable defaults without personal grouping rules");configPath=originalConfig;
     check(NativeResources::ThreadCount()>0,L"shared resource sampler reports this process's threads");
     CaptureTimer::Initialize(mainWindow,instance,baseDir);CaptureTimer::testCapture=FakeCapture;
     KillTimer(mainWindow,CaptureTimer::TimerId());

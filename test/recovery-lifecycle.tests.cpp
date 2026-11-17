@@ -2,6 +2,7 @@
 #include "../src/app/TrayGroups.cpp"
 
 static HWND owner=nullptr;
+static GUID ownedGuid={};
 static std::wstring report;
 static bool passed=true;
 static void Check(bool value,const wchar_t* label){report+=(value?L"PASS ":L"FAIL ")+std::wstring(label)+L"\n";passed&=value;}
@@ -16,14 +17,16 @@ static bool AddIcons(HINSTANCE instance){
     owner=mainWindow=CreateWindowW(wc.lpszClassName,L"",WS_POPUP,0,0,0,0,nullptr,nullptr,instance,nullptr);
     NOTIFYICONDATAW n={};n.cbSize=sizeof(n);n.hWnd=owner;n.uFlags=NIF_ICON|NIF_TIP|NIF_MESSAGE|NIF_STATE;n.uCallbackMessage=WM_APP+51;
     n.hIcon=LoadIconW(nullptr,IDI_INFORMATION);n.dwStateMask=NIS_HIDDEN;n.uID=8101;wcscpy_s(n.szTip,L"TrayGroups recovery owned test");
-    bool ok=Shell_NotifyIconW(NIM_ADD,&n);n.uID=8102;n.dwState=NIS_HIDDEN;wcscpy_s(n.szTip,L"TrayGroups originally hidden test");
+    if(FAILED(CoCreateGuid(&ownedGuid)))return false;
+    n.uFlags|=NIF_GUID;n.guidItem=ownedGuid;
+    bool ok=Shell_NotifyIconW(NIM_ADD,&n);n.uFlags&=~NIF_GUID;n.guidItem={};n.uID=8102;n.dwState=NIS_HIDDEN;wcscpy_s(n.szTip,L"TrayGroups originally hidden test");
     return Shell_NotifyIconW(NIM_ADD,&n)&&ok;
 }
-static Hidden Record(const TrayItem& item){Hidden r={item.toolbar,item.owner,item.id,item.command,item.runtime};r.path=item.path;r.ownerClass=item.ownerClass;r.callback=item.callback;return r;}
+static Hidden Record(const TrayItem& item){Hidden r={item.toolbar,item.owner,item.id,item.command,item.runtime};r.path=item.path;r.ownerClass=item.ownerClass;r.callback=item.callback;r.guid=item.guid;r.usesGuid=item.usesGuid;return r;}
 static void JournalTests(){
     auto a=FindIcon(8101),b=FindIcon(8102);a.group=b.group=L"Test";items={a,b};hidden.clear();settingsConfig.foldIcons=true;
     FoldAssigned();Check(PresentHidden(8101)&&PresentHidden(8102)&&hidden.size()==1,L"only the newly hidden icon is journaled; pre-hidden icon is untouched");
-    auto text=ReadText(recoveryPath);Check(text.find(L"WasHidden=0")!=std::wstring::npos&&text.find(L"[Icon1]")!=std::wstring::npos,L"readable INI journal is committed before hiding");
+    auto text=ReadText(recoveryPath);Check(text.find(L"WasHidden=0")!=std::wstring::npos&&text.find(L"Version=3")!=std::wstring::npos&&text.find(GuidKey(ownedGuid))!=std::wstring::npos,L"GUID and original state are committed to version 3 journal before hiding");
     hidden.clear();RestoreAllOwnedIcons();
     Check(!PresentHidden(8101)&&PresentHidden(8102)&&hidden.empty(),L"Restore All imports the disk journal and preserves the pre-hidden icon");
     Check(ReadText(configPath).find(L"CustomSetting=keep")!=std::wstring::npos&&ReadText(configPath).find(L"FoldOriginalIcons=0")!=std::wstring::npos,L"restore pauses folding without overwriting unrelated settings");
@@ -67,7 +70,7 @@ static void PortableTests(HINSTANCE instance,const std::wstring& binary){
     AddIcons(instance);Check(Until([]{return FindIcon(8101).runtime.Valid()&&PresentHidden(8102);}),L"production lifecycle test icons are ready");
     auto a=FindIcon(8101),b=FindIcon(8102);std::wstring folder=baseDir+L"\\portable";CaptureTimer::MakeDirectories(folder);
     Check(CopyFileW(binary.c_str(),(folder+L"\\TrayGroups.exe").c_str(),FALSE)!=FALSE,L"production executable copied to isolated portable folder");
-    std::wstring config=L"[Settings]\nFoldOriginalIcons=1\nDebugLogging=1\n[Icons]\n"+IconKey(a,L"path-class-id")+L"=Test\n"+IconKey(b,L"path-class-id")+L"=Test\n";
+    std::wstring config=L"[Settings]\nFoldOriginalIcons=1\nDebugLogging=1\n[Icons]\n"+IconKey(a,L"path-guid")+L"=Test\n"+IconKey(b,L"path-guid")+L"=Test\n";
     WriteText(folder+L"\\groups.ini",config);
     for(bool crash:{true,false}){
         PROCESS_INFORMATION p=StartPortable(folder,L"--background");
@@ -91,7 +94,7 @@ static void PortableTests(HINSTANCE instance,const std::wstring& binary){
     Check(finished&&code==0&&VisibleAtRuntime(a.runtime)&&PresentHidden(8102),L"standalone --restore recovers from the INI with no resident app or guard");
     Check(GetFileAttributesW(recoveryPath.c_str())==INVALID_FILE_ATTRIBUTES,L"standalone recovery verifies visibility before clearing the INI");
     recoveryPath=previous;
-    NOTIFYICONDATAW icon={};icon.cbSize=sizeof(icon);icon.hWnd=owner;for(UINT id:{8101u,8102u}){icon.uID=id;Shell_NotifyIconW(NIM_DELETE,&icon);}DestroyWindow(owner);owner=mainWindow=nullptr;
+    NOTIFYICONDATAW icon={};icon.cbSize=sizeof(icon);icon.hWnd=owner;icon.uID=8101;icon.uFlags=NIF_GUID;icon.guidItem=ownedGuid;Shell_NotifyIconW(NIM_DELETE,&icon);icon.uFlags=0;icon.uID=8102;Shell_NotifyIconW(NIM_DELETE,&icon);DestroyWindow(owner);owner=mainWindow=nullptr;
 }
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int){
     std::wstring path=ExePath();path.resize(path.find_last_of(L'\\'));std::wstring binary=path+L"\\TrayGroups.exe";

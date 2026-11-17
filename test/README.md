@@ -1,6 +1,6 @@
 # 测试目录
 
-`guid-research/` 是独立分支的 [托盘 GUID 通用读取实验](guid-research/README.md)，验证内部 COM 快照、普通/GUID 图标识别与隐藏恢复，不参与正式程序构建。
+`guid-research/` 的 [托盘 GUID 回归测试](guid-research/README.md) 直接链接正式 `TrayGuid.cpp`，验证内部 COM 快照、普通/GUID 图标识别与隐藏恢复；自测入口不参与正式构建。
 
 测试源码、测试程序、临时配置、测试图片、报告及编译产物仅存放在此目录。测试配置与正式配置隔离。
 

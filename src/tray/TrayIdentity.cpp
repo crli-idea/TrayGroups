@@ -52,21 +52,9 @@ std::wstring IconKey(const TrayItem &i, const std::wstring &mode) {
     return mode + L"|" + path + L"|" + KeyPart(StableClass(i.ownerClass)) + L"|" +
            (mode == L"path-class-tip" ? KeyPart(i.tip) : Number(i.id));
 }
-std::wstring LegacyKey(const TrayItem &i) {
-    return Lower(i.path) + L"|" + Number(i.id);
-}
 std::vector<std::wstring> Matcher::IconKeys(const TrayItem &i) const {
-    std::vector<std::wstring> keys;
-    for (const auto &mode :
-         {settings.iconMatch, std::wstring(L"path-guid"), std::wstring(L"path-class-id"),
-          std::wstring(L"path-id"), std::wstring(L"path-class-tip")}) {
-        auto key = IconKey(i, mode);
-        if (!key.empty() && std::find(keys.begin(), keys.end(), key) == keys.end())
-            keys.push_back(key);
-    }
-    if (!i.path.empty())
-        keys.push_back(LegacyKey(i));
-    return keys;
+    auto key = IconKey(i, settings.iconMatch);
+    return key.empty() ? std::vector<std::wstring>{} : std::vector<std::wstring>{key};
 }
 
 MatchResult Matcher::FindGroup(const TrayItem &item,
@@ -93,8 +81,8 @@ MatchResult Matcher::FindGroup(const TrayItem &item,
             return result;
         }
         auto binding = state.ruleBindings.find(key);
-        if (item.runtime.Valid() && binding != state.ruleBindings.end() &&
-            !(binding->second == item.runtime)) {
+        if (key.find(L"path-guid|") != 0 && item.runtime.Valid() &&
+            binding != state.ruleBindings.end() && !(binding->second == item.runtime)) {
             result.pending = true;
             result.status = L"待确认：图标已重新创建";
             return result;
@@ -148,7 +136,7 @@ void Matcher::ResolveGroups(std::vector<TrayItem> &list) {
         item.group = match.pending ? L"" : match.group;
         if (!match.pending && item.runtime.Valid())
             for (const auto &key : IconKeys(item))
-                if (settings.assignments.count(key) && !state.ruleBindings.count(key))
+                if (settings.assignments.count(key))
                     state.ruleBindings[key] = item.runtime;
     }
 }

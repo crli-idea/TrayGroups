@@ -9,7 +9,6 @@ namespace TrayIdentity {
 std::wstring StableClass(std::wstring name);
 std::wstring GuidKey(const GUID &guid);
 std::wstring IconKey(const TrayItem &item, const std::wstring &mode);
-std::wstring LegacyKey(const TrayItem &item);
 std::wstring RulePath(const std::wstring &key);
 bool SameRuntime(const TrayItem &first, const TrayItem &second);
 

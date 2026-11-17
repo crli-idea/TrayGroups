@@ -21,7 +21,8 @@ static int TileAt(POINT pt) {
     return -1;
 }
 static bool PopupEligible(const TrayItem &item) {
-    return !item.group.empty() && !item.pending && (item.state & TBSTATE_HIDDEN);
+    return !item.group.empty() && !item.pending && item.addressKnown &&
+           (item.state & TBSTATE_HIDDEN);
 }
 static void PerformTile(int tile, int action) {
     if (tile < 0 || tile >= (int)popupItems.size())
@@ -74,15 +75,7 @@ static std::wstring ItemLabel(const TrayItem &i) {
     return i.process;
 }
 static std::wstring FriendlyIconName(const TrayItem &i) {
-    std::wstring cls = StableClass(i.ownerClass);
-    if (cls == L"atl@sndvolsso.dll")
-        return L"系统音量";
-    if (cls == L"bluetoothnotificationareaiconwindowclass")
-        return L"蓝牙设备";
-    if (cls == L"atl@pnidui.dll")
-        return L"网络状态";
-    if (cls == L"atl@securityhealthsso.dll")
-        return L"Windows 安全中心";
+    // 提示文字由原程序提供，不维护具体应用/系统图标的名称表。
     std::wstring label = ItemLabel(i);
     return label.empty() ? L"程序图标" : label;
 }

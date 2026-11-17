@@ -29,6 +29,7 @@ struct TrayItem {
     RuntimeIdentity runtime;
     GUID guid = {};
     bool usesGuid = false;
+    bool addressKnown = false; // 本次 COM 快照或已落盘的隐藏记录确认了寻址方式。
     bool pending = false;
     std::wstring matchStatus;
 };

@@ -17,5 +17,10 @@ foreach ($script in @(
     }
 }
 
+try {
+    & (Join-Path $PSScriptRoot 'guid-research\run.ps1') -SelfTest
+} catch {
+    $failures.Add("GUID regression: $_")
+}
 if ($failures.Count) { throw ($failures -join [Environment]::NewLine) }
 Write-Output 'All project tests passed.'

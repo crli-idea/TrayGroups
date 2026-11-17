@@ -30,7 +30,7 @@ void Settings::Load(const std::wstring &configPath) {
     groupLabelSizes.clear();
     groupLabelWidths.clear();
     groupLabelHeights.clear();
-    iconMatch = L"path-class-id";
+    iconMatch = L"path-guid";
     defaultLabelSize = 12;
     foldIcons = true;
     haveSettingsPosition = false;
@@ -108,7 +108,7 @@ bool Settings::Save(const std::wstring &configPath) const {
         L"\n"
         L"DebugLogging=" +
         std::wstring(debugLogging ? L"1" : L"0") +
-        L"\n; Per-icon identity modes: path-class-id (default), path-guid, path-id, "
+        L"\n; Per-icon identity modes: path-guid (default), path-class-id, path-id, "
         L"path-class-tip.\nIconMatch=" +
         iconMatch + L"\nDefaultGroupLabelSize=" + std::to_wstring(defaultLabelSize) +
         L"\n\n[Programs]\n; Executable filename: all matching icons (explicit broad rules).\n";

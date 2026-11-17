@@ -8,7 +8,7 @@ int LabelSize(int value);
 bool ValidMatch(const std::wstring &value);
 
 struct Settings {
-    std::wstring iconMatch = L"path-class-id";
+    std::wstring iconMatch = L"path-guid";
     int defaultLabelSize = 12, settingsX = 0, settingsY = 0;
     bool haveSettingsPosition = false, foldIcons = true, debugLogging = true;
     std::map<std::wstring, int> groupLabelSizes, groupLabelWidths, groupLabelHeights;

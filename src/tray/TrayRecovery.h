@@ -2,6 +2,7 @@
 // 只恢复本程序认领的隐藏操作，不批量显示 Windows 原本隐藏的图标。
 #pragma once
 #include <cerrno>
+#include <objbase.h>
 
 static bool recoveryHealthy = true;
 static unsigned lastRestoredCount = 0;
@@ -28,11 +29,11 @@ static bool ReadRecoveryFile(const std::wstring &path, std::vector<Hidden> &reco
     std::wstring section;
     Hidden record;
     unsigned fields = 0;
-    bool version = false;
+    unsigned version = 0;
     auto finish = [&]() {
         if (section.find(L"icon") != 0)
             return true;
-        if (fields != 31 || !record.runtime.Valid())
+        if (fields != (version == 3 ? 63u : 31u) || !record.runtime.Valid())
             return false;
         records.push_back(record);
         return true;
@@ -89,7 +90,7 @@ static bool ReadRecoveryFile(const std::wstring &path, std::vector<Hidden> &reco
                      value = Trim(line.substr(equals + 1));
         if (section == L"recovery") {
             if (key == L"version")
-                version = value == L"2";
+                version = value == L"3" ? 3 : value == L"2" ? 2 : 0;
             continue;
         }
         if (section.find(L"icon") != 0)
@@ -100,6 +101,17 @@ static bool ReadRecoveryFile(const std::wstring &path, std::vector<Hidden> &reco
         }
         if (key == L"class") {
             record.ownerClass = value;
+            continue;
+        }
+        if (key == L"guid") {
+            record.usesGuid = !value.empty();
+            if (record.usesGuid) {
+                GUID empty = {};
+                if (FAILED(CLSIDFromString((L"{" + value + L"}").c_str(), &record.guid)) ||
+                    IsEqualGUID(record.guid, empty))
+                    return false;
+            }
+            fields |= 32;
             continue;
         }
         uint64_t number = 0;
@@ -167,7 +179,7 @@ static bool WriteRecovery() {
         return ok;
     }
     std::wstring text = L"; TrayGroups recovery ownership journal. Do not delete while icons are "
-                        L"hidden.\r\n[Recovery]\r\nVersion=2\r\n";
+                        L"hidden.\r\n[Recovery]\r\nVersion=3\r\n";
     for (size_t n = 0; n < hidden.size(); n++) {
         const auto &h = hidden[n];
         text += L"\r\n[Icon" + Number(n + 1) + L"]\r\nPath=" + Escape(h.path) + L"\r\nClass=" +
@@ -175,7 +187,8 @@ static bool WriteRecovery() {
                 L"\r\nProcessStarted=" + Number(h.runtime.started) + L"\r\nOwnerWindow=" +
                 Number((ULONG_PTR)h.owner) + L"\r\nIconId=" + Number(h.id) + L"\r\nCallback=" +
                 Number(h.callback) + L"\r\nToolbar=" + Number((ULONG_PTR)h.toolbar) +
-                L"\r\nWasHidden=" + Number(h.originalHidden) + L"\r\n";
+                L"\r\nWasHidden=" + Number(h.originalHidden) + L"\r\nGuid=" +
+                (h.usesGuid ? GuidKey(h.guid) : L"") + L"\r\n";
     }
     std::wstring temporary = recoveryPath + L".tmp";
     auto bytes = Utf8(text);
@@ -218,7 +231,9 @@ static bool RecoveryMatches(const Hidden &record, const TrayItem &item) {
            (record.path.empty() || Lower(record.path) == Lower(item.path)) &&
            (record.ownerClass.empty() ||
             StableClass(record.ownerClass) == StableClass(item.ownerClass)) &&
-           (!record.callback || record.callback == item.callback);
+           (!record.callback || record.callback == item.callback) &&
+           (!item.addressKnown || (record.usesGuid == item.usesGuid &&
+                                   (!record.usesGuid || IsEqualGUID(record.guid, item.guid))));
 }
 static bool RecoveryStillHidden(const Hidden &record, const std::vector<TrayItem> &live) {
     bool found = false;
@@ -244,11 +259,6 @@ static void RestoreHidden() {
         for (const auto &item : current)
             if (RecoveryMatches(record, item) && (item.state & TBSTATE_HIDDEN)) {
                 bool restored = NativeVisibility(item, false);
-                if (!restored && !record.toolbar && CommandMatches(item)) {
-                    DWORD_PTR result = 0;
-                    Send(item.toolbar, TB_HIDEBUTTON, item.command, MAKELPARAM(FALSE, 0), result);
-                    InvalidateRect(item.toolbar, nullptr, TRUE);
-                }
                 DebugLog::Write(L"RESTORE requested owner=" + Number((ULONG_PTR)item.owner) +
                                 L" id=" + Number(item.id) + L" accepted=" + Number(restored));
                 break;

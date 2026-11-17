@@ -81,7 +81,6 @@ static void ReadToolbar(HWND toolbar, TrayScanContext &scan) {
                                ? L"PID " + Number(ownerPid)
                                : item.path.substr(slash == std::wstring::npos ? 0 : slash + 1);
             item.ownerClass = scan.Class(item.owner, ownerPid);
-            item.usesGuid = ResolveIconGuid(item, item.guid);
             item.runtime = {ownerPid, owner.started, item.owner, item.id};
             DWORD_PTR chars = 0;
             if (Send(toolbar, TB_GETBUTTONTEXTW, item.command, (LPARAM)memory, chars) &&
@@ -120,6 +119,7 @@ static std::vector<TrayItem> ReadTrayLocations(bool includeImages = false) {
     std::vector<TrayItem> result;
     TrayScanContext scan{result, includeImages, {}, {}};
     EnumWindows(ReadRoot, (LPARAM)&scan);
+    ResolveTrayGuids(result);
     return result;
 }
 static std::vector<TrayItem> ReadTray(bool includeImages = true) {

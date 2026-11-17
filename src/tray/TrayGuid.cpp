@@ -1,9 +1,9 @@
-#include "TrayNotifySnapshot.h"
-#include "../../src/common/TraySupport.h"
+#include "TrayGuid.h"
+#include "../common/TraySupport.h"
 #include <objbase.h>
 #include <shlobj.h>
 
-namespace GuidResearch {
+namespace TrayGuid {
 // COM 对象由进程外实现，接口类型不能放匿名命名空间，否则 GCC 可能按本地类型去虚化。
 namespace Detail {
 // 这些是 Explorer 服务/接口的标识，不是任何托盘图标的 GUID。
@@ -85,17 +85,6 @@ class Callback final : public NotifyCallback {
         return S_OK;
     }
 };
-void Pump(DWORD milliseconds) {
-    ULONGLONG until = GetTickCount64() + milliseconds;
-    do {
-        MSG message;
-        while (PeekMessageW(&message, nullptr, 0, 0, PM_REMOVE)) {
-            TranslateMessage(&message);
-            DispatchMessageW(&message);
-        }
-        MsgWaitForMultipleObjectsEx(0, nullptr, 15, QS_ALLINPUT, MWMO_INPUTAVAILABLE);
-    } while (GetTickCount64() < until);
-}
 } // namespace Detail
 using namespace Detail;
 bool Snapshot::Ok() const {
@@ -103,6 +92,11 @@ bool Snapshot::Ok() const {
 }
 Snapshot ReadSnapshot() {
     Snapshot snapshot;
+    HRESULT initialized = CoInitializeEx(nullptr, COINIT_APARTMENTTHREADED);
+    if (FAILED(initialized)) {
+        snapshot.created = initialized;
+        return snapshot;
+    }
     ULONGLONG started = GetTickCount64();
     TrayNotify *service = nullptr;
     snapshot.created = CoCreateInstance(TrayNotifyClass, nullptr, CLSCTX_LOCAL_SERVER,
@@ -111,7 +105,6 @@ Snapshot ReadSnapshot() {
         Callback *callback = new Callback;
         snapshot.registered = service->RegisterCallback(callback, &snapshot.cookie);
         if (SUCCEEDED(snapshot.registered)) {
-            Pump(80);
             snapshot.unregistered = service->UnregisterCallback(snapshot.cookie);
         }
         snapshot.records = std::move(callback->records);
@@ -119,6 +112,7 @@ Snapshot ReadSnapshot() {
         service->Release();
     }
     snapshot.elapsedMs = GetTickCount64() - started;
+    CoUninitialize();
     return snapshot;
 }
 std::wstring NormalizeExecutable(const std::wstring &executable) {
@@ -137,9 +131,10 @@ std::wstring NormalizeExecutable(const std::wstring &executable) {
     }
     return TraySupport::Lower(path);
 }
-bool FindLiveGuid(const Snapshot &snapshot, HWND owner, UINT id, const std::wstring &executable,
-                  GUID &guid) {
+bool FindLiveAddress(const Snapshot &snapshot, HWND owner, UINT id, const std::wstring &executable,
+                     GUID &guid, bool &usesGuid) {
     guid = {};
+    usesGuid = false;
     if (!snapshot.Ok() || !owner || !IsWindow(owner) || executable.empty())
         return false;
     DWORD pid = 0;
@@ -161,8 +156,7 @@ bool FindLiveGuid(const Snapshot &snapshot, HWND owner, UINT id, const std::wstr
     bool found = false;
     for (const auto &record : snapshot.records) {
         if (record.owner != owner || record.id != id || record.pid != pid ||
-            record.processStarted != started || IsEqualGUID(record.guid, empty) ||
-            NormalizeExecutable(record.executable) != expected)
+            record.processStarted != started || NormalizeExecutable(record.executable) != expected)
             continue;
         if (found && !IsEqualGUID(candidate, record.guid))
             return false;
@@ -174,7 +168,21 @@ bool FindLiveGuid(const Snapshot &snapshot, HWND owner, UINT id, const std::wstr
     if (!found || stillPid != pid || ProcessStarted(pid) != started)
         return false;
     guid = candidate;
+    usesGuid = !IsEqualGUID(candidate, empty);
     return true;
+}
+bool FindLiveGuid(const Snapshot &snapshot, HWND owner, UINT id, const std::wstring &executable,
+                  GUID &guid) {
+    bool usesGuid = false;
+    return FindLiveAddress(snapshot, owner, id, executable, guid, usesGuid) && usesGuid;
+}
+void Resolve(std::vector<TrayItem> &items) {
+    if (items.empty())
+        return;
+    auto snapshot = ReadSnapshot();
+    for (auto &item : items)
+        item.addressKnown =
+            FindLiveAddress(snapshot, item.owner, item.id, item.path, item.guid, item.usesGuid);
 }
 std::wstring Hex(HRESULT result) {
     wchar_t text[16];
@@ -186,4 +194,4 @@ std::wstring GuidText(const GUID &guid) {
     StringFromGUID2(guid, text, 40);
     return text;
 }
-} // namespace GuidResearch
+} // namespace TrayGuid
