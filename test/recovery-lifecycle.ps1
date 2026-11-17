@@ -1,8 +1,11 @@
 $ErrorActionPreference = 'Stop'
+$projectRoot = Split-Path -Parent $PSScriptRoot
 $mingwBin = 'C:\Environment\msys64\mingw64\bin'
 if (-not (Test-Path (Join-Path $mingwBin 'g++.exe'))) { $mingwBin = Split-Path -Parent (Get-Command g++.exe -ErrorAction Stop).Source }
+New-Item -ItemType Directory -Path (Join-Path $PSScriptRoot 'build') -Force | Out-Null
 $binary = Join-Path $PSScriptRoot 'build\recovery-lifecycle.tests.exe'
-& (Join-Path $mingwBin 'g++.exe') -std=c++17 -Os -s -static -fno-exceptions -fno-rtti -municode -mwindows -o $binary "$PSScriptRoot\recovery-lifecycle.tests.cpp" -lcomctl32 -lshell32 -luser32 -lgdi32 -lpsapi -luxtheme -lz -lwtsapi32 -ladvapi32
+$coreSources = @('config\TrayConfig.cpp','tray\TrayIdentity.cpp') | ForEach-Object { Join-Path $projectRoot "src\$_" }
+& (Join-Path $mingwBin 'g++.exe') -std=c++17 -Os -s -static -fno-exceptions -fno-rtti -municode -mwindows -o $binary "$PSScriptRoot\recovery-lifecycle.tests.cpp" @coreSources -lcomctl32 -lshell32 -luser32 -lgdi32 -lpsapi -luxtheme -lz -lwtsapi32 -ladvapi32
 if ($LASTEXITCODE -ne 0) { throw 'Recovery lifecycle test build failed.' }
 $process = Start-Process -FilePath $binary -WindowStyle Hidden -PassThru
 if (-not $process.WaitForExit(55000)) { throw 'Recovery lifecycle test timeout.' }

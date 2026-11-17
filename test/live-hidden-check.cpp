@@ -1,5 +1,5 @@
 #define NATIVE_TEST_BUILD
-#include "../TrayGroups.cpp"
+#include "../src/app/TrayGroups.cpp"
 #include <cstdio>
 static void CaptureTaskbar(const std::wstring& path) {
     HWND tray=FindWindowW(L"Shell_TrayWnd",nullptr);RECT area;if(!tray||!GetWindowRect(tray,&area))return;
@@ -34,7 +34,7 @@ int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR argument,int) {
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     if(Trim(argument?argument:L"")==L"popup"){CapturePopup();return 0;}
     baseDir=L"C:\\work\\TrayGroups";configPath=baseDir+L"\\groups.ini";LoadSettings();
-    auto icons=ReadTray();std::wstring report=L"fold="+Number(foldIcons)+L"\n";
+    auto icons=ReadTray();std::wstring report=L"fold="+Number(settingsConfig.foldIcons)+L"\n";
     for(const auto& item:icons)report+=item.process+L"\t"+FriendlyIconName(item)+L"\tgroup="+item.group+L"\thidden="+Number((item.state&TBSTATE_HIDDEN)!=0)+L"\teligible="+Number(PopupEligible(item))+L"\towner="+Number((ULONG_PTR)item.owner)+L"\tid="+Number(item.id)+L"\tmatch="+item.matchStatus+L"\n";
     FreeItems(icons);
     std::wstring stage=Trim(argument?argument:L"");if(stage!=L"before"&&stage!=L"after"&&stage!=L"restored")stage=L"after";

@@ -1,5 +1,5 @@
 #define NATIVE_TEST_BUILD
-#include "../TrayGroups.cpp"
+#include "../src/app/TrayGroups.cpp"
 
 static const UINT ActCallback=WM_APP+2;
 // Isolated regression harness: two icons owned by this process, no clicks on user apps.
@@ -63,7 +63,7 @@ static int SelfTest() {
     }
     std::wstring originalRecovery=recoveryPath;recoveryPath=baseDir+L"\\test-restore.tmp";
     for(auto& i:items)i.group=L"Self-test";
-    bool originalFold=foldIcons;foldIcons=true;FoldAssigned();
+    bool originalFold=settingsConfig.foldIcons;settingsConfig.foldIcons=true;FoldAssigned();
     if(hidden.size()!=2){pass=false;failures+=L"Expected two hidden test icons; actual "+Number(hidden.size())+L"\n";}
     auto verify=ReadTray();for(auto& i:verify)if(i.owner==h&&(i.id==401||i.id==402)&&!(i.state&TBSTATE_HIDDEN))pass=false;FreeItems(verify);checks++;
     RestoreHidden();if(!hidden.empty()||GetFileAttributesW(recoveryPath.c_str())!=INVALID_FILE_ATTRIBUTES)pass=false;
@@ -87,13 +87,13 @@ static int SelfTest() {
         hidden.push_back({unresolved.toolbar,h,unresolved.id,unresolved.command,unresolved.runtime});WriteRecovery();
         MainProc(h,StopApp,0,0);
         if(hidden.empty()||!IsWindow(h)||GetFileAttributesW(recoveryPath.c_str())==INVALID_FILE_ATTRIBUTES){pass=false;failures+=L"Exit lost unresolved recovery record\n";}
-        checks++;hidden.clear();DeleteFileW(recoveryPath.c_str());foldIcons=true;
-        KillTimer(mainWindow,RestoreTimer);exitRequested=false;stopAfterCapture=false;CaptureTimer::stopRequested=false;
+        checks++;hidden.clear();DeleteFileW(recoveryPath.c_str());settingsConfig.foldIcons=true;
+        KillTimer(mainWindow,RestoreTimer);lifecycle.CancelExit();CaptureTimer::stopRequested=false;
     }
-    auto savedAssignments=assignments;auto savedPrograms=programAssignments;auto savedPaths=pathAssignments;
-    assignments.clear();programAssignments.clear();pathAssignments.clear();pendingRules.clear();ruleBindings.clear();
+    auto savedAssignments=settingsConfig.assignments;auto savedPrograms=settingsConfig.programAssignments;auto savedPaths=settingsConfig.pathAssignments;
+    settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();matchState.pendingRules.clear();matchState.ruleBindings.clear();
     if(items.size()==2){
-        auto key=IconKey(items[0],L"path-class-id");assignments[key]=L"CollisionTest";ResolveGroups(items);FoldAssigned();
+        auto key=IconKey(items[0],L"path-class-id");settingsConfig.assignments[key]=L"CollisionTest";matcher.ResolveGroups(items);FoldAssigned();
         HWND duplicate=CreateWindowW(c.lpszClassName,L"",0,0,0,0,0,nullptr,nullptr,c.hInstance,nullptr);
         NOTIFYICONDATAW duplicateIcon=a;duplicateIcon.hWnd=duplicate;duplicateIcon.uID=items[0].id;wcscpy_s(duplicateIcon.szTip,L"Isolated duplicate identity");
         bool added=Shell_NotifyIconW(NIM_ADD,&duplicateIcon)!=FALSE;
@@ -105,15 +105,15 @@ static int SelfTest() {
         if(!added||pendingCount!=2||!restored||!hidden.empty()){pass=false;failures+=L"live identity collision failed to restore the test icon\n";}
         checks++;FreeItems(after);Shell_NotifyIconW(NIM_DELETE,&duplicateIcon);DestroyWindow(duplicate);
     }else pass=false;
-    assignments=savedAssignments;programAssignments=savedPrograms;pathAssignments=savedPaths;pendingRules.clear();ruleBindings.clear();
-    foldIcons=originalFold;recoveryPath=originalRecovery;
+    settingsConfig.assignments=savedAssignments;settingsConfig.programAssignments=savedPrograms;settingsConfig.pathAssignments=savedPaths;matchState.pendingRules.clear();matchState.ruleBindings.clear();
+    settingsConfig.foldIcons=originalFold;recoveryPath=originalRecovery;
     FreeItems(items);FreeItems(own);Shell_NotifyIconW(NIM_DELETE,&a);Shell_NotifyIconW(NIM_DELETE,&b);testingOwnIcons=false;
     // Round-trip Unicode group assignments, stable keys, and removal.
     WriteText(baseDir+L"\\test-progress.txt",L"configuration round-trip\n");
-    auto original=assignments;std::wstring oldConfig=configPath;configPath=baseDir+L"\\test-groups.tmp";assignments={{L"c:\\tools\\network.exe|2",L"网络"},{L"c:\\tools\\notes.exe|0",L"工具"}};
+    auto original=settingsConfig.assignments;std::wstring oldConfig=configPath;configPath=baseDir+L"\\test-groups.tmp";settingsConfig.assignments={{L"c:\\tools\\network.exe|2",L"网络"},{L"c:\\tools\\notes.exe|0",L"工具"}};
     TrayItem network;network.path=L"c:\\tools\\network.exe";network.process=L"network.exe";network.id=2;
-    bool folded=foldIcons;foldIcons=false;if(!SaveSettings())pass=false;assignments.clear();LoadSettings();if(assignments.size()!=2||GroupFor(network)!=L"网络"||foldIcons)pass=false;
-    DeleteFileW(configPath.c_str());assignments=original;configPath=oldConfig;foldIcons=folded;checks++;
+    bool folded=settingsConfig.foldIcons;settingsConfig.foldIcons=false;if(!SaveSettings())pass=false;settingsConfig.assignments.clear();LoadSettings();if(settingsConfig.assignments.size()!=2||matcher.GroupFor(network)!=L"网络"||settingsConfig.foldIcons)pass=false;
+    DeleteFileW(configPath.c_str());settingsConfig.assignments=original;configPath=oldConfig;settingsConfig.foldIcons=folded;checks++;
 
     auto systemAfter=ReadTrayLocations();bool systemStates=true;unsigned compared=0;
     for(const auto& before:systemBefore){
@@ -134,14 +134,14 @@ static bool IdentityRegression(std::wstring& report) {
     HMENU captureMenu=CreatePopupMenu();CaptureTimer::AddMenu(captureMenu);
     check(GetMenuItemCount(captureMenu)==1&&GetMenuItemCount(GetSubMenu(captureMenu,0))==7,L"scheduled capture is available as a submenu without another tray entry");DestroyMenu(captureMenu);
     auto previousConfig=configPath;configPath=baseDir+L"\\default-identity.ini";DeleteFileW(configPath.c_str());LoadSettings();
-    check(iconMatch==L"path-class-id",L"new configuration defaults to full-path, stable-window-class, and icon-ID identity");
-    configPath=previousConfig;iconMatch=L"path-class-id";
-    configPath=baseDir+L"\\identity-config.ini";assignments.clear();programAssignments.clear();pathAssignments.clear();groupLabelSizes.clear();groupLabelWidths.clear();groupLabelHeights.clear();iconMatch=L"path-class-id";
+    check(settingsConfig.iconMatch==L"path-class-id",L"new configuration defaults to full-path, stable-window-class, and icon-ID identity");
+    configPath=previousConfig;settingsConfig.iconMatch=L"path-class-id";
+    configPath=baseDir+L"\\identity-config.ini";settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();settingsConfig.groupLabelSizes.clear();settingsConfig.groupLabelWidths.clear();settingsConfig.groupLabelHeights.clear();settingsConfig.iconMatch=L"path-class-id";
     TrayItem a;a.process=L"explorer.exe";a.path=L"C:\\Windows\\explorer.exe";a.ownerClass=L"BluetoothNotificationAreaIconWindowClass";a.id=0;a.tip=L"蓝牙设备";
     TrayItem b=a;b.ownerClass=L"VolumeWindow";b.tip=L"耳机: 12%";
     TrayItem c=b;c.path=L"D:\\Other\\explorer.exe";
-    assignments[IconKey(a,iconMatch)]=L"连接";assignments[IconKey(b,iconMatch)]=L"音量";
-    check(IconKey(a,iconMatch)!=IconKey(b,iconMatch)&&GroupFor(a)==L"连接"&&GroupFor(b)==L"音量"&&GroupFor(c).empty(),L"same executable and same icon ID distinguished by owner class; different full paths stay separate");
+    settingsConfig.assignments[IconKey(a,settingsConfig.iconMatch)]=L"连接";settingsConfig.assignments[IconKey(b,settingsConfig.iconMatch)]=L"音量";
+    check(IconKey(a,settingsConfig.iconMatch)!=IconKey(b,settingsConfig.iconMatch)&&matcher.GroupFor(a)==L"连接"&&matcher.GroupFor(b)==L"音量"&&matcher.GroupFor(c).empty(),L"same executable and same icon ID distinguished by owner class; different full paths stay separate");
     wchar_t systemDir[MAX_PATH]={};GetSystemDirectoryW(systemDir,MAX_PATH);
     std::wstring explorerPath=std::wstring(systemDir).substr(0,std::wstring(systemDir).find_last_of(L'\\'))+L"\\explorer.exe";
     TrayItem volume;volume.path=explorerPath;volume.ownerClass=L"ATL@sndvolsso.dll";volume.id=100;
@@ -152,45 +152,45 @@ static bool IdentityRegression(std::wstring& report) {
     TrayItem systemBluetooth=a;systemBluetooth.ownerClass=L"BluetoothNotificationAreaIconWindowClass";systemBluetooth.group=L"";
     check(FriendlyIconName(systemAudio)==L"系统音量"&&FriendlyIconName(systemBluetooth)==L"蓝牙设备",L"system icon names are readable in settings");
     systemAudio.group=L"音量";
-    auto changing=b;changing.tip=L"耳机: 87%";changing.owner=(HWND)0x1234;check(GroupFor(changing)==L"音量",L"dynamic tooltip and window handle do not affect default identity");
-    a.ownerClass=L"ATL:0000ABCD";b=a;b.ownerClass=L"ATL:0000DEF0";check(IconKey(a,iconMatch)==IconKey(b,iconMatch),L"process-specific ATL addresses normalized");
-    a.ownerClass=L"Bluetooth";b=a;programAssignments[L"explorer.exe"]=L"整程序";assignments[IconKey(a,iconMatch)]=L"";
-    check(GroupFor(a).empty(),L"explicit ungrouped icon overrides broad executable rule");
-    std::vector<TrayItem> ambiguous={a,b};ResolveGroups(ambiguous);
+    auto changing=b;changing.tip=L"耳机: 87%";changing.owner=(HWND)0x1234;check(matcher.GroupFor(changing)==L"音量",L"dynamic tooltip and window handle do not affect default identity");
+    a.ownerClass=L"ATL:0000ABCD";b=a;b.ownerClass=L"ATL:0000DEF0";check(IconKey(a,settingsConfig.iconMatch)==IconKey(b,settingsConfig.iconMatch),L"process-specific ATL addresses normalized");
+    a.ownerClass=L"Bluetooth";b=a;settingsConfig.programAssignments[L"explorer.exe"]=L"整程序";settingsConfig.assignments[IconKey(a,settingsConfig.iconMatch)]=L"";
+    check(matcher.GroupFor(a).empty(),L"explicit ungrouped icon overrides broad executable rule");
+    std::vector<TrayItem> ambiguous={a,b};matcher.ResolveGroups(ambiguous);
     check(ambiguous[0].group.empty()&&ambiguous[1].group.empty()&&ambiguous[0].pending&&ambiguous[1].pending,L"ambiguous per-icon rule blocks executable fallback and leaves both icons pending");
-    std::vector<TrayItem> remaining={a};ResolveGroups(remaining);
+    std::vector<TrayItem> remaining={a};matcher.ResolveGroups(remaining);
     check(remaining[0].pending&&remaining[0].group.empty(),L"ambiguity stays pending after a duplicate exits");
-    pendingRules.clear();ruleBindings.clear();
-    assignments.clear();programAssignments.clear();pathAssignments[Lower(c.path)]=L"独立路径";
-    check(GroupFor(c)==L"独立路径"&&GroupFor(a).empty(),L"full-path grouping does not affect same filename elsewhere");
-    iconMatch=L"path-id";assignments[IconKey(c,iconMatch)]=L"按ID";
-    iconMatch=L"path-class-tip";assignments[IconKey(a,iconMatch)]=L"按提示";
-    check(GroupFor(c)==L"按ID"&&GroupFor(a)==L"按提示",L"previous matching modes remain valid after changing the default");
-    a.path=L"C:\\test=folder\\explorer.exe";a.tip=L"Name=first|second\nnext";auto escaped=IconKey(a,iconMatch);assignments[escaped]=L"转义";
+    matchState.pendingRules.clear();matchState.ruleBindings.clear();
+    settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments[Lower(c.path)]=L"独立路径";
+    check(matcher.GroupFor(c)==L"独立路径"&&matcher.GroupFor(a).empty(),L"full-path grouping does not affect same filename elsewhere");
+    settingsConfig.iconMatch=L"path-id";settingsConfig.assignments[IconKey(c,settingsConfig.iconMatch)]=L"按ID";
+    settingsConfig.iconMatch=L"path-class-tip";settingsConfig.assignments[IconKey(a,settingsConfig.iconMatch)]=L"按提示";
+    check(matcher.GroupFor(c)==L"按ID"&&matcher.GroupFor(a)==L"按提示",L"previous matching modes remain valid after changing the default");
+    a.path=L"C:\\test=folder\\explorer.exe";a.tip=L"Name=first|second\nnext";auto escaped=IconKey(a,settingsConfig.iconMatch);settingsConfig.assignments[escaped]=L"转义";
     check(escaped.find(L'=')==std::wstring::npos&&RulePath(escaped)==Lower(a.path),L"INI delimiters and multiline tooltip escaped without changing the saved path");
-    groupLabelSizes[L"连接"]=9;groupLabelSizes[L"音量"]=24;settingsX=-500;settingsY=80;haveSettingsPosition=true;
-    assignments[IconKey(c,L"path-class-id")]=L"";
-    bool saved=SaveSettings();assignments.clear();pathAssignments.clear();groupLabelSizes.clear();groupLabelWidths.clear();groupLabelHeights.clear();LoadSettings();
-    check(saved&&assignments.count(escaped)&&GroupFor(c).empty()&&GroupLabelSize(L"连接")==9&&GroupLabelSize(L"音量")==24&&haveSettingsPosition&&settingsX==-500&&settingsY==80&&iconMatch==L"path-class-tip",L"INI round-trip: identities, explicit exclusions, paths, per-group sizes and negative window coordinates");
+    settingsConfig.groupLabelSizes[L"连接"]=9;settingsConfig.groupLabelSizes[L"音量"]=24;settingsConfig.settingsX=-500;settingsConfig.settingsY=80;settingsConfig.haveSettingsPosition=true;
+    settingsConfig.assignments[IconKey(c,L"path-class-id")]=L"";
+    bool saved=SaveSettings();settingsConfig.assignments.clear();settingsConfig.pathAssignments.clear();settingsConfig.groupLabelSizes.clear();settingsConfig.groupLabelWidths.clear();settingsConfig.groupLabelHeights.clear();LoadSettings();
+    check(saved&&settingsConfig.assignments.count(escaped)&&matcher.GroupFor(c).empty()&&settingsConfig.GroupLabelSize(L"连接")==9&&settingsConfig.GroupLabelSize(L"音量")==24&&settingsConfig.haveSettingsPosition&&settingsConfig.settingsX==-500&&settingsConfig.settingsY==80&&settingsConfig.iconMatch==L"path-class-tip",L"INI round-trip: identities, explicit exclusions, paths, per-group sizes and negative window coordinates");
     WriteText(configPath,ReadText(configPath)+L"\n[Unknown]\nValue=keep\n");
     check(LabelSize(2)==8&&LabelSize(100)==32,L"font size bounds");
-    assignments.clear();programAssignments.clear();pathAssignments.clear();pendingRules.clear();ruleBindings.clear();iconMatch=L"path-class-id";
+    settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();matchState.pendingRules.clear();matchState.ruleBindings.clear();settingsConfig.iconMatch=L"path-class-id";
     TrayItem first;first.path=L"C:\\test\\same.exe";first.process=L"same.exe";first.ownerClass=L"SameClass";first.id=7;first.owner=(HWND)101;first.callback=WM_APP+30;first.runtime={1234,1000,first.owner,7};
     TrayItem second=first;second.owner=(HWND)102;second.runtime.owner=second.owner;
-    auto key=IconKey(first,iconMatch);assignments[key]=L"\u5355\u4e2a";programAssignments[L"same.exe"]=L"\u5168\u90e8";pathAssignments[Lower(first.path)]=L"\u8def\u5f84";
-    std::vector<TrayItem> live={first};ResolveGroups(live);
-    check(!live[0].pending&&live[0].group==L"\u5355\u4e2a"&&ruleBindings.count(key),L"single selector binds to the current process lifetime and owning window");
-    live={second};ResolveGroups(live);
+    auto key=IconKey(first,settingsConfig.iconMatch);settingsConfig.assignments[key]=L"\u5355\u4e2a";settingsConfig.programAssignments[L"same.exe"]=L"\u5168\u90e8";settingsConfig.pathAssignments[Lower(first.path)]=L"\u8def\u5f84";
+    std::vector<TrayItem> live={first};matcher.ResolveGroups(live);
+    check(!live[0].pending&&live[0].group==L"\u5355\u4e2a"&&matchState.ruleBindings.count(key),L"single selector binds to the current process lifetime and owning window");
+    live={second};matcher.ResolveGroups(live);
     check(live[0].pending&&live[0].group.empty(),L"same saved selector cannot transfer to a different owning window during this run");
     auto restarted=first;restarted.runtime.started++;
     check(!SameRuntime(first,restarted),L"PID and window reuse across process restarts is rejected");
     auto otherId=first;otherId.id++;otherId.runtime.id=otherId.id;check(!SameRuntime(first,otherId),L"different tray icon IDs remain distinct at runtime");
     check(!SameRuntime(first,second),L"same path, class and icon ID still represent distinct runtime windows");
-    ForgetRule(key);assignments[key]=L"\u5df2\u786e\u8ba4";live={second};ResolveGroups(live);
+    matcher.ForgetRule(key);settingsConfig.assignments[key]=L"\u5df2\u786e\u8ba4";live={second};matcher.ResolveGroups(live);
     check(!live[0].pending&&live[0].group==L"\u5df2\u786e\u8ba4",L"explicit reselection confirms a recreated icon");
-    assignments[IconKey(second,L"path-id")]=L"\u53e6\u4e00\u7ec4";live={second};ResolveGroups(live);
+    settingsConfig.assignments[IconKey(second,L"path-id")]=L"\u53e6\u4e00\u7ec4";live={second};matcher.ResolveGroups(live);
     check(live[0].pending&&live[0].group.empty(),L"conflicting saved selectors block matching instead of choosing precedence");
-    pendingRules.clear();ruleBindings.clear();assignments.clear();programAssignments.clear();pathAssignments.clear();
+    matchState.pendingRules.clear();matchState.ruleBindings.clear();settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();
 
     WriteText(baseDir+L"\\identity-self-test.txt",report);return ok;
 }
@@ -209,8 +209,8 @@ static bool HiddenPopupRegression(std::wstring& report) {
     auto check=[&](bool passed,const wchar_t* label){report+=(passed?L"PASS: ":L"FAIL: ")+std::wstring(label)+L"\n";if(!passed)ok=false;};
     std::wstring oldConfig=configPath,oldRecovery=recoveryPath;
     configPath=baseDir+L"\\hidden-popup-config.ini";recoveryPath=baseDir+L"\\hidden-popup-restore.tsv";
-    assignments.clear();programAssignments.clear();pathAssignments.clear();pendingRules.clear();ruleBindings.clear();
-    groupLabelSizes.clear();groupLabelWidths.clear();groupLabelHeights.clear();iconMatch=L"path-class-id";foldIcons=true;
+    settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();matchState.pendingRules.clear();matchState.ruleBindings.clear();
+    settingsConfig.groupLabelSizes.clear();settingsConfig.groupLabelWidths.clear();settingsConfig.groupLabelHeights.clear();settingsConfig.iconMatch=L"path-class-id";settingsConfig.foldIcons=true;
     testingOwnIcons=true;
     NOTIFYICONDATAW icon={};icon.cbSize=sizeof(icon);icon.hWnd=mainWindow;icon.uFlags=NIF_MESSAGE|NIF_TIP|NIF_ICON;
     icon.uCallbackMessage=ActCallback;icon.hIcon=LoadIconW(nullptr,IDI_INFORMATION);
@@ -282,7 +282,7 @@ static bool HiddenPopupRegression(std::wstring& report) {
     // The production deferred timer uses the same path after a forwarded operation.
     NativeVisibility(identity,false);reFoldAttempts=1;MainProc(mainWindow,WM_TIMER,ReFoldTimer,0);
     check(!VisibleAtRuntime(identity.runtime),L"post-click timer folds a program icon revealed by its own update");
-    RestoreHidden();foldIcons=false;Refresh();
+    RestoreHidden();settingsConfig.foldIcons=false;Refresh();
     ShowGroups();check(popupItems.empty(),L"paused folding does not duplicate visible Windows icons in T");
     ClosePopup();ShowGroup(L"");check(showingGroups&&popupItems.empty()&&std::find(popupGroups.begin(),popupGroups.end(),L"")==popupGroups.end(),L"empty-group requests never expose Windows-owned ungrouped icons");
     ClosePopup();RestoreHidden();
@@ -290,7 +290,7 @@ static bool HiddenPopupRegression(std::wstring& report) {
     KillTimer(mainWindow,ReFoldTimer);reFoldAttempts=0;
     Shell_NotifyIconW(NIM_DELETE,&icon);Shell_NotifyIconW(NIM_DELETE,&untouched);
     testingOwnIcons=false;FreeItems(items);FreeItems(settingsItems);
-    assignments.clear();programAssignments.clear();pathAssignments.clear();pendingRules.clear();ruleBindings.clear();
+    settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();matchState.pendingRules.clear();matchState.ruleBindings.clear();
     configPath=oldConfig;recoveryPath=oldRecovery;LoadSettings();
     return ok;
 }
@@ -313,16 +313,22 @@ static bool GuidRegression(std::wstring& report) {
         auto changed=item;changed.path=L"D:\\\\fake\\\\explorer.exe";check(!ResolveIconGuid(changed,guid),L"non-system explorer executable cannot claim Bluetooth or volume GUID");
     }
     FreeItems(actual);
-    bool oldFold=foldIcons;foldIcons=true;testingOwnIcons=true;
-    assignments.clear();programAssignments.clear();pathAssignments.clear();pendingRules.clear();ruleBindings.clear();
+    bool oldFold=settingsConfig.foldIcons;settingsConfig.foldIcons=true;testingOwnIcons=true;
+    settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();matchState.pendingRules.clear();matchState.ruleBindings.clear();
     GUID guid={0x58c7a6be,0x6134,0x4c73,{0xb6,0x24,0x82,0x22,0xce,0x53,0xb4,0x19}};
+    // Explorer 将 GUID 图标与 EXE 路径关联。测试移到 build/ 后不能复用旧路径的
+    // 固定 GUID；按当前路径派生测试标识，正式程序的身份规则不受影响。
+    uint64_t executableHash=14695981039346656037ULL;
+    for(wchar_t c:Lower(ExePath())){executableHash^=(uint16_t)c;executableHash*=1099511628211ULL;}
+    guid.Data1^=(DWORD)executableHash;guid.Data2^=(WORD)(executableHash>>32);guid.Data3^=(WORD)(executableHash>>48);
     NOTIFYICONDATAW icon={};icon.cbSize=sizeof(icon);icon.hWnd=mainWindow;icon.uID=703;icon.guidItem=guid;
     icon.uFlags=NIF_GUID|NIF_ICON|NIF_TIP|NIF_MESSAGE;icon.hIcon=LoadIconW(nullptr,IDI_INFORMATION);icon.uCallbackMessage=ActCallback;
     wcscpy_s(icon.szTip,L"TrayGroups GUID hiding regression");
     testIconGuids[{mainWindow,703}]=guid;
-    bool added=Shell_NotifyIconW(NIM_ADD,&icon)!=FALSE;icon.uVersion=4;Shell_NotifyIconW(NIM_SETVERSION,&icon);
+    SetLastError(ERROR_SUCCESS);bool added=Shell_NotifyIconW(NIM_ADD,&icon)!=FALSE;DWORD addError=added?ERROR_SUCCESS:GetLastError();icon.uVersion=4;Shell_NotifyIconW(NIM_SETVERSION,&icon);
     FreeItems(items);items=ReadTray();TrayItem identity;bool found=false;
     for(const auto& item:items)if(item.owner==mainWindow&&item.id==703){identity=item;identity.image=nullptr;found=true;}
+    report+=L"GUID registration: added="+Number(added)+L" win32="+Number(addError)+L" found="+Number(found)+L"\n";
     check(added&&found&&identity.usesGuid,L"GUID-addressed tray icon is recognized separately from owner and numeric ID");
     if(found){
         auto key=IconKey(identity,L"path-guid");auto changed=identity;
@@ -334,14 +340,14 @@ static bool GuidRegression(std::wstring& report) {
         check(key!=IconKey(changed,L"path-guid"),L"same GUID under a different executable path is a distinct persisted identity");
         changed=identity;changed.usesGuid=false;
         check(IconKey(changed,L"path-guid")==IconKey(changed,L"path-class-id"),L"missing GUID falls back to existing path class and numeric ID instead of inventing one");
-        assignments[IconKey(identity,L"path-class-id")]=L"GUID group";
-        ResolveGroups(items);check(GroupFor(identity)==L"GUID group",L"existing per-icon rules continue matching GUID-aware icons");
-        assignments.clear();iconMatch=L"path-guid";assignments[key]=L"GUID group";
+        settingsConfig.assignments[IconKey(identity,L"path-class-id")]=L"GUID group";
+        matcher.ResolveGroups(items);check(matcher.GroupFor(identity)==L"GUID group",L"existing per-icon rules continue matching GUID-aware icons");
+        settingsConfig.assignments.clear();settingsConfig.iconMatch=L"path-guid";settingsConfig.assignments[key]=L"GUID group";
         auto oldConfig=configPath;configPath=baseDir+L"\\guid-identity.ini";
-        bool saved=SaveSettings();assignments.clear();LoadSettings();
-        check(saved&&iconMatch==L"path-guid"&&GroupFor(identity)==L"GUID group",L"path plus GUID matching mode and assignment persist through INI save and load");
+        bool saved=SaveSettings();settingsConfig.assignments.clear();LoadSettings();
+        check(saved&&settingsConfig.iconMatch==L"path-guid"&&matcher.GroupFor(identity)==L"GUID group",L"path plus GUID matching mode and assignment persist through INI save and load");
         configPath=oldConfig;
-        ResolveGroups(items);FoldAssigned();
+        matcher.ResolveGroups(items);FoldAssigned();
         check(hidden.size()==1&&!VisibleAtRuntime(identity.runtime),L"GUID-addressed tray icon really hides through Shell notification state API");
         ClosePopup();ShowGroups();bool present=false;
         for(int n:popupItems)if(items[n].owner==mainWindow&&items[n].id==703)present=true;
@@ -356,8 +362,8 @@ static bool GuidRegression(std::wstring& report) {
         check(VisibleAtRuntime(identity.runtime)&&GetFileAttributesW(recoveryPath.c_str())==INVALID_FILE_ATTRIBUTES,L"GUID icon restores from persisted journal after in-memory state is lost");
     }
     RestoreHidden();Shell_NotifyIconW(NIM_DELETE,&icon);testIconGuids.erase({mainWindow,703});
-    FreeItems(items);testingOwnIcons=false;foldIcons=oldFold;recoveryPath=previousRecovery;
-    assignments.clear();programAssignments.clear();pathAssignments.clear();pendingRules.clear();ruleBindings.clear();LoadSettings();
+    FreeItems(items);testingOwnIcons=false;settingsConfig.foldIcons=oldFold;recoveryPath=previousRecovery;
+    settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();matchState.pendingRules.clear();matchState.ruleBindings.clear();LoadSettings();
     return ok;
 }
 
@@ -367,10 +373,10 @@ static int UiSelfTest() {
     WNDCLASSW c={};c.hInstance=GetModuleHandleW(nullptr);c.hCursor=LoadCursorW(nullptr,IDC_ARROW);c.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);c.hIcon=appIcon;c.lpfnWndProc=PopupProc;c.lpszClassName=PopupClass;c.style=CS_DBLCLKS;RegisterClassW(&c);
     c.lpfnWndProc=TestProc;c.lpszClassName=L"Crli.TrayGroups.UiReceiver";RegisterClassW(&c);mainWindow=CreateWindowW(c.lpszClassName,L"",0,0,0,0,0,nullptr,nullptr,c.hInstance,nullptr);
     UINT testDpi=GetDpiForWindow(mainWindow);std::wstring report;bool ok=IdentityRegression(report);auto check=[&](bool result,const wchar_t* name){report+=(result?L"PASS: ":L"FAIL: ")+std::wstring(name)+L"\n";if(!result)ok=false;};
-    configPath=baseDir+L"\\ui-test-config.ini";assignments.clear();programAssignments.clear();pathAssignments.clear();groupLabelSizes.clear();groupLabelWidths.clear();groupLabelHeights.clear();iconMatch=L"path-class-id";haveSettingsPosition=false;
+    configPath=baseDir+L"\\ui-test-config.ini";settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();settingsConfig.groupLabelSizes.clear();settingsConfig.groupLabelWidths.clear();settingsConfig.groupLabelHeights.clear();settingsConfig.iconMatch=L"path-class-id";settingsConfig.haveSettingsPosition=false;
     if(!HiddenPopupRegression(report))ok=false;
     if(!GuidRegression(report))ok=false;
-    configPath=baseDir+L"\\ui-test-config.ini";assignments.clear();programAssignments.clear();pathAssignments.clear();groupLabelSizes.clear();groupLabelWidths.clear();groupLabelHeights.clear();foldIcons=false;iconMatch=L"path-class-id";haveSettingsPosition=false;
+    configPath=baseDir+L"\\ui-test-config.ini";settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();settingsConfig.groupLabelSizes.clear();settingsConfig.groupLabelWidths.clear();settingsConfig.groupLabelHeights.clear();settingsConfig.foldIcons=false;settingsConfig.iconMatch=L"path-class-id";settingsConfig.haveSettingsPosition=false;
     ShowSettings();check(settingsWindow&&IsWindowVisible(settingsWindow)&&ListView_GetItemCount(listWindow)>0,L"settings window visible with detected program icons");
     if(!settingsWindow||ListView_GetItemCount(listWindow)==0){WriteText(baseDir+L"\\ui-self-test.txt",report);return 1;}
     check(TabCtrl_GetItemCount(settingsTabs)==3&&IsWindowVisible(settingsPages[0])&&!IsWindowVisible(settingsPages[1])&&!IsWindowVisible(settingsPages[2]),L"three native settings pages with only the current page visible");
@@ -407,23 +413,23 @@ static int UiSelfTest() {
     }
     SelectSettingsPage(1);SelectSettingsPage(2);SelectSettingsPage(0);
     check(ControlText(groupEdit)==L"测试分组"&&groupEditing,L"switching tabs preserves unsaved Chinese group input");
-    check(ApplyGroupEdit()&&GroupFor(a)==L"测试分组"&&GroupFor(b).empty()&&GroupFor(d).empty()&&programAssignments.empty(),L"default edit changes only selected explorer icon");
+    check(ApplyGroupEdit()&&matcher.GroupFor(a)==L"测试分组"&&matcher.GroupFor(b).empty()&&matcher.GroupFor(d).empty()&&settingsConfig.programAssignments.empty(),L"default edit changes only selected explorer icon");
     SetWindowTextW(appearanceGroup,L"测试分组");UpdateLabelSize();
     SetWindowTextW(labelSizeEdit,L"24");SetWindowTextW(labelWidthEdit,L"320");SetWindowTextW(labelHeightEdit,L"90");SendMessageW(settingsWindow,WM_COMMAND,MAKEWPARAM(115,EN_CHANGE),(LPARAM)labelSizeEdit);
-    check(SaveLabelSize()&&GroupLabelSize(L"测试分组")==24&&GroupLabelWidth(L"测试分组")==320&&GroupLabelHeight(L"测试分组")==90,L"per-group label size saved from the settings editor");
+    check(SaveLabelSize()&&settingsConfig.GroupLabelSize(L"测试分组")==24&&settingsConfig.GroupLabelWidth(L"测试分组")==320&&settingsConfig.GroupLabelHeight(L"测试分组")==90,L"per-group label size saved from the settings editor");
     SetWindowTextW(appearanceGroup,L"独立外观");UpdateLabelSize();SetWindowTextW(labelSizeEdit,L"18");
     SetWindowTextW(appearanceGroup,L"下一个组");SendMessageW(settingsWindow,WM_COMMAND,MAKEWPARAM(IDC_APPEARANCE_GROUP,CBN_EDITCHANGE),(LPARAM)appearanceGroup);
-    check(GroupLabelSize(L"独立外观")==18&&ControlText(groupEdit)==L"测试分组"&&!groupEditing,L"appearance group changes retain edits without changing icon assignments");
+    check(settingsConfig.GroupLabelSize(L"独立外观")==18&&ControlText(groupEdit)==L"测试分组"&&!groupEditing,L"appearance group changes retain edits without changing icon assignments");
     SetWindowTextW(appearanceGroup,L"测试分组");UpdateLabelSize();
-    SendMessageW(scopeEdit,CB_SETCURSEL,1,0);SetWindowTextW(groupEdit,L"路径分组");check(ApplyGroupEdit()&&GroupFor(a)==L"路径分组"&&GroupFor(b)==L"路径分组"&&GroupFor(d).empty(),L"path scope groups same path without affecting another explorer installation");
-    SendMessageW(scopeEdit,CB_SETCURSEL,0,0);SetWindowTextW(groupEdit,L"");check(ApplyGroupEdit()&&GroupFor(a).empty()&&GroupFor(b)==L"路径分组",L"single-icon ungroup excludes it from an inherited path rule");
+    SendMessageW(scopeEdit,CB_SETCURSEL,1,0);SetWindowTextW(groupEdit,L"路径分组");check(ApplyGroupEdit()&&matcher.GroupFor(a)==L"路径分组"&&matcher.GroupFor(b)==L"路径分组"&&matcher.GroupFor(d).empty(),L"path scope groups same path without affecting another explorer installation");
+    SendMessageW(scopeEdit,CB_SETCURSEL,0,0);SetWindowTextW(groupEdit,L"");check(ApplyGroupEdit()&&matcher.GroupFor(a).empty()&&matcher.GroupFor(b)==L"路径分组",L"single-icon ungroup excludes it from an inherited path rule");
     check(SaveSettings(),L"group configuration saved");
-    settingsX=140;settingsY=100;haveSettingsPosition=true;RECT expected=SettingsRect();SetWindowPos(settingsWindow,nullptr,expected.left,expected.top,0,0,SWP_NOSIZE|SWP_NOZORDER);
+    settingsConfig.settingsX=140;settingsConfig.settingsY=100;settingsConfig.haveSettingsPosition=true;RECT expected=SettingsRect();SetWindowPos(settingsWindow,nullptr,expected.left,expected.top,0,0,SWP_NOSIZE|SWP_NOZORDER);
     RememberSettingsPosition(settingsWindow);
     auto beforeClose=ReadText(configPath);SetWindowTextW(groupEdit,L"不保存的分组");ApplyGroupEdit();
     SetWindowTextW(appearanceGroup,L"不保存的外观");UpdateLabelSize();SetWindowTextW(labelSizeEdit,L"30");SaveLabelSize();
-    SendMessageW(settingsWindow,WM_CLOSE,0,0);LoadSettings();check(!groupLabelSizes.count(L"不保存的外观"),L"closing discards unapplied appearance edits");
-    check(GroupFor(a).empty()&&ReadText(configPath).find(L"不保存的分组")==std::wstring::npos,L"closing remembers position without saving unapplied group edits");
+    SendMessageW(settingsWindow,WM_CLOSE,0,0);LoadSettings();check(!settingsConfig.groupLabelSizes.count(L"不保存的外观"),L"closing discards unapplied appearance edits");
+    check(matcher.GroupFor(a).empty()&&ReadText(configPath).find(L"不保存的分组")==std::wstring::npos,L"closing remembers position without saving unapplied group edits");
     ShowSettings();RECT actual;GetWindowRect(settingsWindow,&actual);
     check(actual.left==expected.left&&actual.top==expected.top,L"settings restores exact previous screen position after reopening");
     check(ImageList_GetImageCount(settingsImages)==ListView_GetItemCount(listWindow),L"one icon image per actual detected row");
@@ -446,10 +452,10 @@ static int UiSelfTest() {
     check(GetFocus()==GetDlgItem(settingsWindow,IDC_CLOSE),L"Tab key navigates native dialog controls");
     auto openMemory=NativeResources::Read();report+=L"SettingsOpenPrivateWorkingSetBytes="+Number(openMemory.privateWorking)+L"\n";
     check(openMemory.privateWorking<3*1048576,L"open settings private working set is below 3 MiB");
-    bool previousFold=foldIcons;foldIcons=false;SendMessageW(foldCheck,BM_SETCHECK,BST_UNCHECKED,0);
+    bool previousFold=settingsConfig.foldIcons;settingsConfig.foldIcons=false;SendMessageW(foldCheck,BM_SETCHECK,BST_UNCHECKED,0);
     SendMessageW(settingsWindow,WM_COMMAND,IDC_APPLY,0);
     check(ReadText(configPath).find(L"FoldOriginalIcons=0")!=std::wstring::npos&&ControlText(settingsWindow).find(L"\u5df2\u5e94\u7528")!=std::wstring::npos,L"Apply persists settings and refreshes the native dialog");
-    foldIcons=previousFold;
+    settingsConfig.foldIcons=previousFold;
     UpdateWindow(settingsWindow);SaveTestWindow(settingsWindow,baseDir+L"\\settings-preview.bmp");
     SetFocus(GetDlgItem(settingsWindow,IDC_CLOSE));key.hwnd=GetFocus();key.wParam=VK_ESCAPE;
     IsDialogMessageW(settingsWindow,&key);

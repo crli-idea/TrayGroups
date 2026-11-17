@@ -1,5 +1,5 @@
 #define NATIVE_TEST_BUILD
-#include "../TrayGroups.cpp"
+#include "../src/app/TrayGroups.cpp"
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR,int){
  auto current=ReadTray();std::wstring report;
  for(const auto& i:current)if(Lower(i.process)==L"explorer.exe"){

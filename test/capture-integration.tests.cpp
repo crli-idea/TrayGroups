@@ -1,5 +1,5 @@
 #define NATIVE_TEST_BUILD
-#include "../TrayGroups.cpp"
+#include "../src/app/TrayGroups.cpp"
 
 static bool outcome=true;
 static std::atomic<int> workerPriority{THREAD_PRIORITY_ERROR_RETURN};
@@ -34,7 +34,7 @@ template<class Check> static void CheckTrayScanning(Check check,std::wstring& re
     auto light=scan(false),full=scan(true);bool equal=ready&&light.size()==24&&full.size()==24;
     unsigned lightImages=0,fullImages=0;
     for(size_t n=0;n<light.size()&&n<full.size();n++){
-        equal&=SameRuntime(light[n],full[n])&&light[n].tip==full[n].tip&&light[n].state==full[n].state&&IconKey(light[n],iconMatch)==IconKey(full[n],iconMatch);
+        equal&=SameRuntime(light[n],full[n])&&light[n].tip==full[n].tip&&light[n].state==full[n].state&&IconKey(light[n],settingsConfig.iconMatch)==IconKey(full[n],settingsConfig.iconMatch);
         lightImages+=light[n].image!=nullptr;fullImages+=full[n].image!=nullptr;
     }
     check(equal,L"metadata scan preserves all 24 icon identities, tips and visibility states");
@@ -75,7 +75,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int){
     CheckTrayScanning(check,report);
     CheckRecoveryJournal(check);
     std::wstring originalConfig=configPath;configPath=baseDir+L"\\..\\..\\..\\defaults\\groups.ini";LoadSettings();
-    check(!ReadText(configPath).empty()&&assignments.empty()&&pathAssignments.empty()&&programAssignments.empty()&&iconMatch==L"path-class-id"&&foldIcons,L"shipped INI loads portable defaults without personal grouping rules");configPath=originalConfig;
+    check(!ReadText(configPath).empty()&&settingsConfig.assignments.empty()&&settingsConfig.pathAssignments.empty()&&settingsConfig.programAssignments.empty()&&settingsConfig.iconMatch==L"path-class-id"&&settingsConfig.foldIcons,L"shipped INI loads portable defaults without personal grouping rules");configPath=originalConfig;
     check(NativeResources::ThreadCount()>0,L"shared resource sampler reports this process's threads");
     CaptureTimer::Initialize(mainWindow,instance,baseDir);CaptureTimer::testCapture=FakeCapture;
     KillTimer(mainWindow,CaptureTimer::TimerId());

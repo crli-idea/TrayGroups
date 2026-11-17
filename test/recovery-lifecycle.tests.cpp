@@ -1,5 +1,5 @@
 #define NATIVE_TEST_BUILD
-#include "../TrayGroups.cpp"
+#include "../src/app/TrayGroups.cpp"
 
 static HWND owner=nullptr;
 static std::wstring report;
@@ -21,14 +21,14 @@ static bool AddIcons(HINSTANCE instance){
 }
 static Hidden Record(const TrayItem& item){Hidden r={item.toolbar,item.owner,item.id,item.command,item.runtime};r.path=item.path;r.ownerClass=item.ownerClass;r.callback=item.callback;return r;}
 static void JournalTests(){
-    auto a=FindIcon(8101),b=FindIcon(8102);a.group=b.group=L"Test";items={a,b};hidden.clear();foldIcons=true;
+    auto a=FindIcon(8101),b=FindIcon(8102);a.group=b.group=L"Test";items={a,b};hidden.clear();settingsConfig.foldIcons=true;
     FoldAssigned();Check(PresentHidden(8101)&&PresentHidden(8102)&&hidden.size()==1,L"only the newly hidden icon is journaled; pre-hidden icon is untouched");
     auto text=ReadText(recoveryPath);Check(text.find(L"WasHidden=0")!=std::wstring::npos&&text.find(L"[Icon1]")!=std::wstring::npos,L"readable INI journal is committed before hiding");
     hidden.clear();RestoreAllOwnedIcons();
     Check(!PresentHidden(8101)&&PresentHidden(8102)&&hidden.empty(),L"Restore All imports the disk journal and preserves the pre-hidden icon");
     Check(ReadText(configPath).find(L"CustomSetting=keep")!=std::wstring::npos&&ReadText(configPath).find(L"FoldOriginalIcons=0")!=std::wstring::npos,L"restore pauses folding without overwriting unrelated settings");
     Hidden missing=Record(a);missing.id=missing.runtime.id=8199;hidden={missing};WriteRecovery();hidden.clear();RecoverIcons();
-    auto pending=ReadText(recoveryPath);RestoreUnassigned();foldIcons=true;items.clear();FoldAssigned();
+    auto pending=ReadText(recoveryPath);RestoreUnassigned();settingsConfig.foldIcons=true;items.clear();FoldAssigned();
     Check(!hidden.empty()&&!pending.empty()&&ReadText(recoveryPath).find(L"8199")!=std::wstring::npos,L"failed startup recovery survives the following refresh instead of losing its journal");
     // Clear this test's deliberately unresolvable record.
     hidden.clear();DeleteFileW(recoveryPath.c_str());RestoreHidden();items={a,b};
@@ -40,18 +40,18 @@ static void JournalTests(){
     Check(PresentHidden(8102)&&hidden.empty(),L"stale process lifetime after restart cannot modify a new icon");
     hidden={Record(a)};WriteRecovery();std::wstring committed=ReadText(recoveryPath);
     HANDLE locked=CreateFileW(recoveryPath.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
-    items={a,b};foldIcons=true;FoldAssigned();
+    items={a,b};settingsConfig.foldIcons=true;FoldAssigned();
     Check(locked!=INVALID_HANDLE_VALUE&&!recoveryHealthy&&!PresentHidden(8101)&&ReadText(recoveryPath)==committed,L"journal commit failure prevents hiding and retains the previous committed file");
     if(locked!=INVALID_HANDLE_VALUE)CloseHandle(locked);hidden.clear();DeleteFileW(recoveryPath.c_str());recoveryHealthy=true;
     std::wstring corrupt=L"[Recovery]\nVersion=2\n[Icon1]\nIconId=8101\n";WriteText(recoveryPath,corrupt);hidden.clear();RestoreHidden();FoldAssigned();
     Check(!recoveryHealthy&&ReadText(recoveryPath)==corrupt&&!PresentHidden(8101),L"corrupt recovery files are retained and block new hides");
-    DeleteFileW(recoveryPath.c_str());recoveryHealthy=true;hidden.clear();items={a,b};foldIcons=true;FoldAssigned();
+    DeleteFileW(recoveryPath.c_str());recoveryHealthy=true;hidden.clear();items={a,b};settingsConfig.foldIcons=true;FoldAssigned();
     CaptureTimer::busy=true;MainProc(owner,StopApp,0,0);
-    Check(IsWindow(owner)&&!PresentHidden(8101)&&exitRequested,L"exit restores icons while waiting for the capture worker");
+    Check(IsWindow(owner)&&!PresentHidden(8101)&&lifecycle.IsStopping(),L"exit restores icons while waiting for the capture worker");
     Refresh();Check(!PresentHidden(8101),L"refresh cannot hide icons again after exit has begun");
     CaptureTimer::busy=false;MainProc(owner,StopApp,0,0);
     Check(!IsWindow(owner)&&hidden.empty(),L"normal exit waits for verified restoration before destroying its window");
-    mainWindow=owner=nullptr;exitRequested=false;stopAfterCapture=false;CaptureTimer::stopRequested=false;shuttingDown=false;
+    mainWindow=owner=nullptr;lifecycle.CancelExit();CaptureTimer::stopRequested=false;
     FreeItems(items);DeleteFileW(recoveryPath.c_str());
 }
 static HANDLE FindGuard(DWORD parent){

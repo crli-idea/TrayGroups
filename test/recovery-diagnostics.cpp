@@ -1,5 +1,5 @@
 #define NATIVE_TEST_BUILD
-#include "../TrayGroups.cpp"
+#include "../src/app/TrayGroups.cpp"
 
 // Read-only snapshot. Does not change icon state or send application callbacks.
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR,int){

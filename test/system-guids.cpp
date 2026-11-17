@@ -1,5 +1,5 @@
 #define NATIVE_TEST_BUILD
-#include "../TrayGroups.cpp"
+#include "../src/app/TrayGroups.cpp"
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR,int){
  std::wstring report;
  for(const wchar_t* name:{L"bthprops.cpl",L"bthudtask.exe",L"BluetoothApis.dll",L"sndvolsso.dll"}){

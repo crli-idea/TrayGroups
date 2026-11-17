@@ -103,23 +103,29 @@ Top=100
 
 参数：`--settings` 打开设置；`--reload` 重载配置；`--stop` 正常退出并恢复；`--restore` 从 INI 恢复并暂停折叠（已有实例时通知它恢复，不退出）；`--background` 后台启动。内部 `--recovery-watch` 模式仅供看护使用。
 
-代码按职责组织：
+源码统一放在 `src/`，窗口资源放在 `resources/`；根目录保留构建入口、说明和便携配置。目录按职责组织：
 
 | 文件 | 职责 |
 | --- | --- |
-| `TrayGroups.cpp` | 主窗口、分组身份规则、图标隐藏与恢复、消息调度 |
-| `TrayEnumeration.h` | Explorer 托盘扫描；每轮独立的进程与窗口类别缓存 |
-| `TrayRecovery.h` | 恢复 INI、记录合并、异常退出看护及旧记录迁移 |
-| `TrayPopup.h` | 分组弹窗布局、绘制、分页和鼠标操作 |
-| `TraySettings.h` / `TraySettingsIds.h` | 原生设置页和控件编号 |
-| `ScreenCaptureTimer/CaptureTimer.h` | 截图模块供主程序调用的接口 |
-| `ScreenCaptureTimer/ScreenCaptureTimer.cpp` | 独立编译的截图调度、编码和设置实现 |
-| `NativeResources.h` / `DebugLog.h` | 共用的资源采样和本地日志 |
-| `AppVersion.h` | EXE 资源、启动日志和托盘提示共用的版本号 |
+| `src/app/` | 主窗口消息调度、启动退出、版本号；`AppLifecycle.h` 集中管理运行/退出/销毁状态 |
+| `src/config/TrayConfig.h` / `.cpp` | 独立配置对象及 INI 读写，窗口位置和暂停开关采用局部合并 |
+| `src/tray/TrayIdentity.h` / `.cpp` | 独立身份与分组匹配模块，显式接收配置和本次运行的确认状态 |
+| `src/tray/TrayTypes.h` | 图标信息、进程生命周期和恢复记录的数据类型 |
+| `src/tray/TrayEnumeration.h` | Explorer 托盘扫描；每轮独立的进程与窗口类别缓存 |
+| `src/tray/TrayRecovery.h` | 恢复 INI、记录合并、异常退出看护及旧记录迁移 |
+| `src/ui/` | T 弹窗、原生设置页、控件编号 |
+| `src/capture/CaptureTimer.h` | 截图模块供主程序调用的公共接口声明 |
+| `src/capture/ScreenCaptureTimer.cpp` | 独立编译的截图调度、编码和设置实现 |
+| `src/common/` | UTF-8/文件工具、资源采样和本地日志 |
+| `resources/` | 图标、系统主题清单、原生对话框及 EXE 版本资源 |
+| `defaults/` | 发布用的干净默认配置 |
+| `test/` / `test/build/` | 测试源码与诊断工具 / 编译产物、临时配置、报告、备份 |
 
-托盘扫描与弹窗头文件按主程序中的依赖顺序包含；正式主程序通过接口连接截图模块，不直接包含截图实现文件。只有隔离测试包含实现以注入模拟截图。
+`.h` 声明可调用的接口和数据类型，`.cpp` 实现具体行为。例如主程序通过 `CaptureTimer.h` 使用截图模块，无需了解 PNG 编码。配置、身份匹配和截图实现独立编译；配置对象不包含运行时身份，匹配器也不读取主窗口全局变量。
 
-`TrayGroups.manifest` 启用系统控件主题，使用当前用户权限运行；图标与原生对话框资源为 `TrayGroups.ico`、`TrayGroups.rc`。`build.ps1` 依赖 MinGW g++、windres，以 `-Os -s` 构建发布版，输出 `test/build/TrayGroups.exe`。测试源码、工具、临时配置、测试图片、报告和备份统一放 `test`。运行 `test/run-all.ps1` 顺序验证截图集成、图标身份、隐藏与恢复、原左右键、设置页和截图编码；测试不会点击其他程序的图标。
+托盘扫描、恢复和界面头文件目前仍是主窗口私有实现，由主程序按依赖顺序包含；尚未全部改成独立编译模块。隔离的窗口集成测试仍包含宿主实现以注入模拟截图，独立配置/身份测试只链接对应模块。中文注释说明模块边界、图标句柄所有权、身份核验、日志落盘顺序及退出约束；`.clang-format` 统一源码排版。
+
+`resources/TrayGroups.manifest` 启用系统控件主题，使用当前用户权限运行。`build.ps1` 依赖 MinGW g++、windres，以 `-Os -s` 构建发布版，输出 `test/build/TrayGroups.exe`。运行 `test/run-all.ps1` 顺序验证独立模块、截图集成、图标身份、隐藏与恢复、原左右键、设置页和截图编码；测试不会点击其他程序的图标。
 
 1.1.2 将后台状态扫描与界面图片加载分开：后台刷新、隐藏/恢复核对和点击转发不复制图标图片，打开弹窗或设置时才加载。扫描缓存仅在当轮有效，避免跨轮复用 PID。资源面板复用一次内存/CPU 采样，线程数量改为每 5 秒统计。在本机隔离的 24 图标工具栏上连续扫描 20 次，加载图片约 99.5 ms，只读状态约 7.7 ms；这仅反映该扫描步骤，不代表整个程序或截图速度。
 
@@ -138,15 +144,15 @@ Windows 托盘隐藏/恢复接口对部分系统图标需要真实 GUID；这是
 
 截图设置保存在 exe 旁 `config.json`，旧版 `ScreenCaptureTimer/config.json` 会在首次启动时迁移。默认输出目录为 exe 旁 `Captures`。便携目录需要有写入权限。
 
-运行 `build.ps1` 构建 TrayGroups 单一程序。截图编码和测试代码保留在 `ScreenCaptureTimer/` 子目录。运行 `test/run-all.ps1` 执行全部测试。
+运行 `build.ps1` 构建 TrayGroups 单一程序。截图源码在 `src/capture/`，截图测试在 `test/capture/`，所有新编译产物写入 `test/build/`。运行 `test/run-all.ps1` 执行全部测试。
 
-运行 `package.ps1 -Version v1.1.3` 生成 `test/build/TrayGroups-v1.1.3-windows-x64.zip`。便携包包含 `TrayGroups.exe`、干净的默认 `groups.ini` 和 README；模板位于 `defaults/groups.ini`，不包含个人分组或恢复记录。`config.json` 首次启动时生成。升级时保留自己已有的配置和恢复文件。打包脚本检查文件是否齐全，并校验版本标签与 EXE 版本一致。
+运行 `package.ps1 -Version v1.1.4` 生成 `test/build/TrayGroups-v1.1.4-windows-x64.zip`。便携包包含 `TrayGroups.exe`、干净的默认 `groups.ini` 和 README；模板位于 `defaults/groups.ini`，不包含个人分组或恢复记录。`config.json` 首次启动时生成。升级时保留自己已有的配置和恢复文件。打包脚本检查文件是否齐全，并校验版本标签与 EXE 版本一致。
 
 每次推送到 `main` 都会通过 GitHub Actions 自动构建、测试并打包，在对应运行页面的 Artifacts 中提供 Windows 便携包；也支持在 Actions 页面手动运行。推送 `v*` 标签时会额外自动创建 Release 并上传便携包。Release 需要仓库允许 Actions 的 `GITHUB_TOKEN` 写入内容。
 
-发布约定：每次完成 bug 修复或新增功能，都必须递增版本号、验证后提交，并为该提交创建及推送 `v版本号` 标签，触发自动构建和 Release。bug 修复递增补丁版本（例如 `v1.1.2`），新增功能递增次版本（例如 `v1.2.0`）；修改 `AppVersion.h` 中的数字与文本版本即可同步 EXE 资源、启动日志和托盘提示。标签发布后不覆盖或复用，后续修复使用新版本。仅推送 `main` 不算完成上述发布流程。
+发布约定：每次完成 bug 修复或新增功能，都必须递增版本号、验证后提交，并为该提交创建及推送 `v版本号` 标签，触发自动构建和 Release。bug 修复递增补丁版本（例如 `v1.1.2`），新增功能递增次版本（例如 `v1.2.0`）；修改 `src/app/AppVersion.h` 中的数字与文本版本即可同步 EXE 资源、启动日志和托盘提示。标签发布后不覆盖或复用，后续修复使用新版本。仅推送 `main` 不算完成上述发布流程。
 
-例如本次版本：提交后执行 `git tag -a v1.1.3 -m "TrayGroups v1.1.3"`，再执行 `git push origin main v1.1.3`，最后确认 Actions 成功且 Release 的便携包可下载。
+例如本次版本：提交后执行 `git tag -a v1.1.4 -m "TrayGroups v1.1.4"`，再执行 `git push origin main v1.1.4`，最后确认 Actions 成功且 Release 的便携包可下载。
 
 ## 本地调试日志
 

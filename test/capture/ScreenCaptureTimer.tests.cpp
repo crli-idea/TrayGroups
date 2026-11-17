@@ -1,5 +1,5 @@
-﻿#define NATIVE_TEST_BUILD
-#include "../ScreenCaptureTimer.cpp"
+#define NATIVE_TEST_BUILD
+#include "../../src/capture/ScreenCaptureTimer.cpp"
 using namespace CaptureTimer;
 
 static int SelfTest(){bool ok=true;SYSTEMTIME t={};t.wYear=2026;t.wMonth=12;t.wDay=31;t.wHour=23;t.wMinute=59;t.wSecond=59;auto next=FromTicks(Next(Ticks(t)));ok&=next.wYear==2027&&next.wMonth==1&&next.wDay==1&&next.wHour==0&&next.wMinute==0;t.wHour=16;t.wMinute=10;t.wSecond=0;next=FromTicks(Next(Ticks(t)));ok&=next.wHour==16&&next.wMinute==20;t.wMinute=9;t.wSecond=59;t.wMilliseconds=999;next=FromTicks(Next(Ticks(t)));ok&=next.wHour==16&&next.wMinute==10;t.wMinute=10;t.wSecond=7;ok&=FormatName(L"HH-mm",t)==L"16-10";ok&=FormatName(L"HH-mm-ss",t)==L"16-10-07";ok&=FormatName(L"HH:mm",t).empty();ok&=JsonValue(L"{\"OutputDirectory\":\"C:\\\\图片\\\\days\"}",L"OutputDirectory")==L"C:\\图片\\days";

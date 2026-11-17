@@ -1,5 +1,5 @@
 #define NATIVE_TEST_BUILD
-#include "../TrayGroups.cpp"
+#include "../src/app/TrayGroups.cpp"
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR command,int){
     HWND owner=FindWindowW(AppClass,nullptr);std::wstring args=Trim(command?command:L"");std::wstring report=L"args=["+args+L"] owner="+Number((ULONG_PTR)owner)+L"\n";
     DWORD pid=0;DWORD thread=GetWindowThreadProcessId(owner,&pid);report+=L"pid="+Number(pid)+L" thread="+Number(thread)+L"\n";

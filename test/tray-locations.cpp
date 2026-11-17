@@ -1,6 +1,6 @@
 
 #define NATIVE_TEST_BUILD
-#include "../TrayGroups.cpp"
+#include "../src/app/TrayGroups.cpp"
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR,int){
     SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
     auto all=ReadTrayLocations();std::wstring report;

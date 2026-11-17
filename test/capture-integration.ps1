@@ -6,7 +6,8 @@ if (-not (Test-Path (Join-Path $mingwBin 'g++.exe'))) {
 }
 New-Item -ItemType Directory -Path "$PSScriptRoot\build" -Force | Out-Null
 $binary = "$PSScriptRoot\build\capture-integration.tests.exe"
-& (Join-Path $mingwBin 'g++.exe') -std=c++17 -Os -s -static -fno-exceptions -fno-rtti -municode -mwindows -o $binary "$PSScriptRoot\capture-integration.tests.cpp" -lcomctl32 -lshell32 -luser32 -lgdi32 -lpsapi -luxtheme -lz -lwtsapi32 -ladvapi32
+$coreSources = @('config\TrayConfig.cpp','tray\TrayIdentity.cpp') | ForEach-Object { Join-Path $projectRoot "src\$_" }
+& (Join-Path $mingwBin 'g++.exe') -std=c++17 -Os -s -static -fno-exceptions -fno-rtti -municode -mwindows -o $binary "$PSScriptRoot\capture-integration.tests.cpp" @coreSources -lcomctl32 -lshell32 -luser32 -lgdi32 -lpsapi -luxtheme -lz -lwtsapi32 -ladvapi32
 if ($LASTEXITCODE -ne 0) { throw 'Capture integration test build failed.' }
 $process = Start-Process -FilePath $binary -WindowStyle Hidden -PassThru
 if (-not $process.WaitForExit(15000)) { throw 'Capture integration test timed out.' }

@@ -1,5 +1,5 @@
 #include <windows.h>
-#include "AppVersion.h"
+#include "../src/app/AppVersion.h"
 1 ICON "TrayGroups.ico"
 1 RT_MANIFEST "TrayGroups.manifest"
 1 VERSIONINFO
@@ -26,7 +26,7 @@ END
 
 #pragma code_page(65001)
 #include <commctrl.h>
-#include "TraySettingsIds.h"
+#include "../src/ui/TraySettingsIds.h"
 
 
 IDD_SETTINGS DIALOGEX 0, 0, 520, 300

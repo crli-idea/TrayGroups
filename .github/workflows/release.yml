@@ -31,7 +31,11 @@ jobs:
 
       - name: Test screenshot module
         shell: pwsh
-        run: .\ScreenCaptureTimer\test\run.ps1
+        run: .\test\capture\run.ps1
+
+      - name: Test config and identity modules
+        shell: pwsh
+        run: .\test\core-modules.ps1
 
       - name: Test capture and tray callback integration
         shell: pwsh

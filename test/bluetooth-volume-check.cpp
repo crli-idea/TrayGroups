@@ -1,5 +1,5 @@
 #define NATIVE_TEST_BUILD
-#include "../TrayGroups.cpp"
+#include "../src/app/TrayGroups.cpp"
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR,int){
  std::wstring report;auto icons=ReadTray();
  for(const auto& item:icons)if(Lower(item.process)==L"explorer.exe"||Lower(item.process)==L"eartrumpet.exe")report+=item.process+L" class="+item.ownerClass+L" path="+item.path+L" id="+Number(item.id)+L" tip="+item.tip+L"\n";

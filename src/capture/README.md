@@ -26,6 +26,6 @@ activity.log 记录启动、截图、失败；last-capture.json 记录最近图�
 
 截图功能通过 TrayGroups 的 T 菜单控制。
 
-截图只保存本地，不上传，不自动删除。源码是 ScreenCaptureTimer.cpp、NativeResources.h。编译依赖Windows GDI和zlib；发布的 exe 已静态链接 zlib，无需另装 DLL。
+截图只保存本地，不上传，不自动删除。公共接口是本目录的 `CaptureTimer.h`，实现是 `ScreenCaptureTimer.cpp`；资源采样共用 `src/common/NativeResources.h`。编译依赖 Windows GDI 和 zlib；发布的 exe 已静态链接 zlib，无需另装 DLL。
 
-测试代码、自检程序、临时配置和测试报告统一放在 test 目录，正式程序不包含测试入口。运行 test\run.ps1 执行截图模块测试；仓库根目录 build.ps1 会将功能编译到 TrayGroups.exe。
+截图测试源码在 `test/capture/`，自检程序、临时配置和报告输出到 `test/build/capture/`，正式程序不包含测试入口。运行仓库根目录下的 `test/capture/run.ps1` 执行截图模块测试；根目录 `build.ps1` 将功能编译到 TrayGroups.exe。

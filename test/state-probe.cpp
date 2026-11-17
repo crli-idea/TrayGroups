@@ -1,5 +1,5 @@
 #define NATIVE_TEST_BUILD
-#include "../TrayGroups.cpp"
+#include "../src/app/TrayGroups.cpp"
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR command,int){
  if(command&&wcsncmp(command,L"--worker ",9)==0){
    unsigned long long owner=0;unsigned id=0,state=0;
