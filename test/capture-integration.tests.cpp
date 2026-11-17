@@ -16,6 +16,38 @@ static bool WaitForCompletion(){
     }
     return !CaptureTimer::IsBusy();
 }
+template<class Check> static void CheckTrayScanning(Check check,std::wstring& report){
+    INITCOMMONCONTROLSEX controls={sizeof(controls),ICC_BAR_CLASSES};InitCommonControlsEx(&controls);
+    HWND toolbar=CreateWindowExW(0,TOOLBARCLASSNAMEW,L"",WS_CHILD,0,0,0,0,mainWindow,nullptr,GetModuleHandleW(nullptr),nullptr);
+    SendMessageW(toolbar,TB_BUTTONSTRUCTSIZE,sizeof(TBBUTTON),0);
+    std::vector<RemoteTrayData> records(24);std::vector<TBBUTTON> buttons(24);
+    HICON image=LoadIconW(nullptr,IDI_INFORMATION);
+    for(size_t n=0;n<records.size();n++){
+        records[n]={(uint64_t)mainWindow,(UINT)n+100,WM_APP+50,0,4,(uint64_t)image};
+        buttons[n].idCommand=(int)n+100;buttons[n].fsState=TBSTATE_ENABLED;
+        buttons[n].fsStyle=BTNS_BUTTON;buttons[n].dwData=(DWORD_PTR)&records[n];
+        buttons[n].iString=(INT_PTR)L"Isolated tray scan test";
+    }
+    bool ready=toolbar&&SendMessageW(toolbar,TB_ADDBUTTONSW,buttons.size(),(LPARAM)buttons.data());
+    testingOwnIcons=true;
+    auto scan=[&](bool images){std::vector<TrayItem> list;TrayScanContext context{list,images,{},{}};ReadToolbar(toolbar,context);return list;};
+    auto light=scan(false),full=scan(true);bool equal=ready&&light.size()==24&&full.size()==24;
+    unsigned lightImages=0,fullImages=0;
+    for(size_t n=0;n<light.size()&&n<full.size();n++){
+        equal&=SameRuntime(light[n],full[n])&&light[n].tip==full[n].tip&&light[n].state==full[n].state&&IconKey(light[n],iconMatch)==IconKey(full[n],iconMatch);
+        lightImages+=light[n].image!=nullptr;fullImages+=full[n].image!=nullptr;
+    }
+    check(equal,L"metadata scan preserves all 24 icon identities, tips and visibility states");
+    check(equal&&lightImages==0&&fullImages==24,L"background scan creates no icon copies; UI scan retains all images");
+    FreeItems(light);FreeItems(full);
+    LARGE_INTEGER frequency,start,end;QueryPerformanceFrequency(&frequency);
+    auto measure=[&](bool images){QueryPerformanceCounter(&start);for(int n=0;n<20;n++){auto list=scan(images);FreeItems(list);}QueryPerformanceCounter(&end);return (end.QuadPart-start.QuadPart)*1000.0/frequency.QuadPart;};
+    DWORD before=GetGuiResources(GetCurrentProcess(),GR_USEROBJECTS);
+    double fullMs=measure(true),lightMs=measure(false);
+    check(GetGuiResources(GetCurrentProcess(),GR_USEROBJECTS)==before,L"repeated metadata and image scans release their icon handles");
+    wchar_t timing[200];swprintf_s(timing,L"BENCH 20 scans x 24 icons: with images=%.3f ms; metadata=%.3f ms\n",fullMs,lightMs);report+=timing;
+    testingOwnIcons=false;DestroyWindow(toolbar);
+}
 int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int){
     baseDir=ExePath();baseDir.resize(baseDir.find_last_of(L'\\'));baseDir+=L"\\capture-integration";
     CaptureTimer::MakeDirectories(baseDir);configPath=baseDir+L"\\groups.ini";recoveryPath=baseDir+L"\\restore-icons.tsv";
@@ -24,6 +56,10 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int){
     auto check=[&](bool value,const wchar_t* description){report+=(value?L"PASS ":L"FAIL ")+std::wstring(description)+L"\n";ok&=value;};
     WNDCLASSW wc={};wc.hInstance=instance;wc.lpfnWndProc=Receiver;wc.lpszClassName=L"Crli.Capture.IntegrationTest";RegisterClassW(&wc);
     mainWindow=CreateWindowW(wc.lpszClassName,L"",WS_POPUP,0,0,0,0,nullptr,nullptr,instance,nullptr);
+    CheckTrayScanning(check,report);
+    std::wstring originalConfig=configPath;configPath=baseDir+L"\\..\\..\\..\\defaults\\groups.ini";LoadSettings();
+    check(!ReadText(configPath).empty()&&assignments.empty()&&pathAssignments.empty()&&programAssignments.empty()&&iconMatch==L"path-class-id"&&foldIcons,L"shipped INI loads portable defaults without personal grouping rules");configPath=originalConfig;
+    check(NativeResources::ThreadCount()>0,L"shared resource sampler reports this process's threads");
     CaptureTimer::Initialize(mainWindow,instance,baseDir);CaptureTimer::testCapture=FakeCapture;
     KillTimer(mainWindow,CaptureTimer::TimerId());
     check(CaptureTimer::completionMessage==CaptureTimer::CompletionMessage(),L"worker and host use the same completion message");

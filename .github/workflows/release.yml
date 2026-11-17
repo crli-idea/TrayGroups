@@ -39,11 +39,7 @@ jobs:
 
       - name: Package portable binaries
         shell: pwsh
-        run: |
-          $stage = Join-Path $env:RUNNER_TEMP 'traygroups-release'
-          New-Item -ItemType Directory -Path $stage -Force | Out-Null
-          Copy-Item test\build\TrayGroups.exe, README.md -Destination $stage
-          Compress-Archive -Path (Join-Path $stage '*') -DestinationPath "test\build\TrayGroups-$env:RELEASE_TAG-windows-x64.zip" -Force
+        run: .\package.ps1 -Version $env:RELEASE_TAG
 
       - name: Upload portable build
         uses: actions/upload-artifact@v4

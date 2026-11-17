@@ -1,9 +1,10 @@
 #include <windows.h>
+#include "AppVersion.h"
 1 ICON "TrayGroups.ico"
 1 RT_MANIFEST "TrayGroups.manifest"
 1 VERSIONINFO
-FILEVERSION 1,1,1,0
-PRODUCTVERSION 1,1,1,0
+FILEVERSION TRAYGROUPS_VERSION_NUMBERS
+PRODUCTVERSION TRAYGROUPS_VERSION_NUMBERS
 FILEOS VOS_NT_WINDOWS32
 FILETYPE VFT_APP
 BEGIN
@@ -13,7 +14,7 @@ BEGIN
     BEGIN
       VALUE "FileDescription", "TrayGroups\0"
       VALUE "ProductName", "TrayGroups\0"
-      VALUE "FileVersion", "1.1.1\0"
+      VALUE "FileVersion", TRAYGROUPS_VERSION_TEXT "\0"
       VALUE "OriginalFilename", "TrayGroups.exe\0"
     END
   END

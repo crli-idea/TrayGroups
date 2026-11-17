@@ -11,6 +11,6 @@ try {
     & (Join-Path $mingwBin 'windres.exe') -i TrayGroups.rc -o $resourceObject
     if ($LASTEXITCODE -ne 0) { throw 'Icon resource build failed.' }
 } finally { Pop-Location }
-& (Join-Path $mingwBin 'g++.exe') -std=c++17 -Os -s -static -fno-exceptions -fno-rtti -municode -mwindows '-Wl,--nxcompat,--dynamicbase' -o "$buildOutput\TrayGroups.exe" "$PSScriptRoot\TrayGroups.cpp" $resourceObject -lcomctl32 -lshell32 -luser32 -lgdi32 -lpsapi -luxtheme -lz -lwtsapi32 -ladvapi32
+& (Join-Path $mingwBin 'g++.exe') -std=c++17 -Os -s -static -fno-exceptions -fno-rtti -DSCREEN_CAPTURE_EMBEDDED -municode -mwindows '-Wl,--nxcompat,--dynamicbase' -o "$buildOutput\TrayGroups.exe" "$PSScriptRoot\TrayGroups.cpp" "$PSScriptRoot\ScreenCaptureTimer\ScreenCaptureTimer.cpp" $resourceObject -lcomctl32 -lshell32 -luser32 -lgdi32 -lpsapi -luxtheme -lz -lwtsapi32 -ladvapi32
 if ($LASTEXITCODE -ne 0) { throw 'Production build failed.' }
 Write-Output "Production executable: $buildOutput\TrayGroups.exe"

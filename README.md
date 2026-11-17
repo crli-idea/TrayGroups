@@ -95,7 +95,24 @@ Top=100
 
 参数：--settings 打开设置；--reload 重载配置；--stop 正常退出并恢复；--restore 恢复；--background 后台启动。
 
-主逻辑在 TrayGroups.cpp；设置逻辑独立到 TraySettings.h，控件编号集中在 TraySettingsIds.h；资源采样在 NativeResources.h。TrayGroups.manifest 启用系统控件主题，使用当前用户权限运行，不强制提权。图标与原生对话框资源为 TrayGroups.ico、TrayGroups.rc。设置控件不再通过主文件中的逐项 CreateWindow 创建，重复的组名列表填充与组合框读取已合并。build.ps1 依赖 MinGW g++、windres，产物全部放 test\\build。测试源码、工具、临时配置、测试图片、报告和备份统一放 test；正式程序不包含测试入口。运行 test\\run.ps1 验证配置、图标身份、单 T 入口、标签大小、窗口位置、原左右键及恢复操作，以及 100% / 当前系统缩放下的分页布局、中文输入、键盘导航、应用/取消与打开设置时的内存。测试不会点击其他程序的图标。
+代码按职责组织：
+
+| 文件 | 职责 |
+| --- | --- |
+| `TrayGroups.cpp` | 主窗口、分组身份规则、图标隐藏与恢复、消息调度 |
+| `TrayEnumeration.h` | Explorer 托盘扫描；每轮独立的进程与窗口类别缓存 |
+| `TrayPopup.h` | 分组弹窗布局、绘制、分页和鼠标操作 |
+| `TraySettings.h` / `TraySettingsIds.h` | 原生设置页和控件编号 |
+| `ScreenCaptureTimer/CaptureTimer.h` | 截图模块供主程序调用的接口 |
+| `ScreenCaptureTimer/ScreenCaptureTimer.cpp` | 独立编译的截图调度、编码和设置实现 |
+| `NativeResources.h` / `DebugLog.h` | 共用的资源采样和本地日志 |
+| `AppVersion.h` | EXE 资源、启动日志和托盘提示共用的版本号 |
+
+托盘扫描与弹窗头文件按主程序中的依赖顺序包含；正式主程序通过接口连接截图模块，不直接包含截图实现文件。只有隔离测试包含实现以注入模拟截图。
+
+`TrayGroups.manifest` 启用系统控件主题，使用当前用户权限运行；图标与原生对话框资源为 `TrayGroups.ico`、`TrayGroups.rc`。`build.ps1` 依赖 MinGW g++、windres，以 `-Os -s` 构建发布版，输出 `test/build/TrayGroups.exe`。测试源码、工具、临时配置、测试图片、报告和备份统一放 `test`。运行 `test/run-all.ps1` 顺序验证截图集成、图标身份、隐藏与恢复、原左右键、设置页和截图编码；测试不会点击其他程序的图标。
+
+1.1.2 将后台状态扫描与界面图片加载分开：后台刷新、隐藏/恢复核对和点击转发不复制图标图片，打开弹窗或设置时才加载。扫描缓存仅在当轮有效，避免跨轮复用 PID。资源面板复用一次内存/CPU 采样，线程数量改为每 5 秒统计。在本机隔离的 24 图标工具栏上连续扫描 20 次，加载图片约 99.5 ms，只读状态约 7.7 ms；这仅反映该扫描步骤，不代表整个程序或截图速度。
 
 
 ## 安全中心图标与管理员权限
@@ -112,13 +129,15 @@ Windows 托盘隐藏/恢复接口对部分系统图标需要真实 GUID；这是
 
 截图设置保存在 exe 旁 `config.json`，旧版 `ScreenCaptureTimer/config.json` 会在首次启动时迁移。默认输出目录为 exe 旁 `Captures`。便携目录需要有写入权限。
 
-运行 `build.ps1` 构建 TrayGroups 单一程序。截图编码和测试代码保留在 `ScreenCaptureTimer/` 子目录。运行 `test/run-all.ps1` 执行两套测试。
+运行 `build.ps1` 构建 TrayGroups 单一程序。截图编码和测试代码保留在 `ScreenCaptureTimer/` 子目录。运行 `test/run-all.ps1` 执行全部测试。
+
+运行 `package.ps1 -Version v1.1.2` 生成 `test/build/TrayGroups-v1.1.2-windows-x64.zip`。便携包包含 `TrayGroups.exe`、干净的默认 `groups.ini` 和 README；模板位于 `defaults/groups.ini`，不包含个人分组。`config.json` 首次启动时生成。升级时保留自己已有的 `groups.ini` 和 `config.json`。打包脚本检查文件是否齐全，并校验版本标签与 EXE 版本一致。
 
 每次推送到 `main` 都会通过 GitHub Actions 自动构建、测试并打包，在对应运行页面的 Artifacts 中提供 Windows 便携包；也支持在 Actions 页面手动运行。推送 `v*` 标签时会额外自动创建 Release 并上传便携包。Release 需要仓库允许 Actions 的 `GITHUB_TOKEN` 写入内容。
 
-发布约定：每次完成 bug 修复或新增功能，都必须递增版本号、验证后提交，并为该提交创建及推送 `v版本号` 标签，触发自动构建和 Release。bug 修复递增补丁版本（例如 `v1.1.1`），新增功能递增次版本（例如 `v1.2.0`）；EXE 版本资源、启动日志和托盘提示中的版本号须同步。标签发布后不覆盖或复用，后续修复使用新版本。仅推送 `main` 不算完成上述发布流程。
+发布约定：每次完成 bug 修复或新增功能，都必须递增版本号、验证后提交，并为该提交创建及推送 `v版本号` 标签，触发自动构建和 Release。bug 修复递增补丁版本（例如 `v1.1.2`），新增功能递增次版本（例如 `v1.2.0`）；修改 `AppVersion.h` 中的数字与文本版本即可同步 EXE 资源、启动日志和托盘提示。标签发布后不覆盖或复用，后续修复使用新版本。仅推送 `main` 不算完成上述发布流程。
 
-例如本次版本：提交后执行 `git tag -a v1.1.1 -m "TrayGroups v1.1.1"`，再执行 `git push origin main v1.1.1`，最后确认 Actions 成功且 Release 的便携包可下载。
+例如本次版本：提交后执行 `git tag -a v1.1.2 -m "TrayGroups v1.1.2"`，再执行 `git push origin main v1.1.2`，最后确认 Actions 成功且 Release 的便携包可下载。
 
 ## 本地调试日志
 

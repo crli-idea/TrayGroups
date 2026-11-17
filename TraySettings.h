@@ -69,7 +69,7 @@ static bool ApplyGroupEdit() {
         if(key.empty()||count>1){MessageBoxW(settingsWindow,L"当前规则不能唯一区分所选图标。请更换识别方式，或明确选择按路径/程序整体分组。",L"无法单独匹配",MB_ICONWARNING);return false;}
     }
     if(scope<=0&&std::any_of(selected.begin(),selected.end(),[&](int n){return settingsItems[n].owner!=nullptr;})){
-        auto live=ReadTray();bool valid=true;
+        auto live=ReadTray(false);bool valid=true;
         for(int n:selected){
             const auto& old=settingsItems[n];auto key=IconKey(old,iconMatch);unsigned matches=0;bool same=false;
             for(const auto& item:live){if(IconKey(item,iconMatch)==key)matches++;if(SameRuntime(old,item))same=true;}

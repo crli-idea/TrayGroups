@@ -1,4 +1,5 @@
 groups.ini
+!defaults/groups.ini
 config.json
 Captures/
 activity.log

@@ -1,9 +1,23 @@
 #pragma once
 #include <windows.h>
 #include <psapi.h>
+#include <tlhelp32.h>
 #include <vector>
 
 namespace NativeResources {
+// Only used by the resource panel. Avoid a system thread snapshot every second.
+inline unsigned ThreadCount() {
+    static ULONGLONG nextSample=0;static unsigned count=0;
+    ULONGLONG now=GetTickCount64();if(now<nextSample)return count;
+    nextSample=now+5000;HANDLE snapshot=CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD,0);
+    if(snapshot==INVALID_HANDLE_VALUE)return count;
+    unsigned current=0;THREADENTRY32 entry={};entry.dwSize=sizeof(entry);
+    if(Thread32First(snapshot,&entry)){
+        do{if(entry.th32OwnerProcessID==GetCurrentProcessId())current++;}while(Thread32Next(snapshot,&entry));
+        count=current;
+    }
+    CloseHandle(snapshot);return count;
+}
 struct Sample { SIZE_T working=0, privateCommit=0, privateWorking=0; double cpuSeconds=0; };
 inline Sample Read() {
     Sample s;PROCESS_MEMORY_COUNTERS_EX p={};p.cb=sizeof(p);

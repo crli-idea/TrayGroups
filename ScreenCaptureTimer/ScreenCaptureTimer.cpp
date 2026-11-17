@@ -14,9 +14,8 @@
 #include <string>
 #include <vector>
 #include "../DebugLog.h"
-#ifndef SCREEN_CAPTURE_EMBEDDED
+#include "CaptureTimer.h"
 #include "NativeResources.h"
-#endif
 
 namespace CaptureTimer {
 
@@ -163,7 +162,6 @@ static LRESULT CALLBACK MainProc(HWND h,UINT msg,WPARAM w,LPARAM l){
     return DefWindowProcW(h,msg,w,l);
 }
 
-static const UINT CaptureNowCommand=2101,PauseCommand=2102,SettingsCommand=2103,ResourcesCommand=2104,FolderCommand=2105;
 static HINSTANCE hostInstance=nullptr;
 static bool initialized=false;
 
