@@ -1,5 +1,9 @@
 # TrayGroups 托盘分组器（C++ 原生版）
 
+仓库：[crli-idea/TrayGroups](https://github.com/crli-idea/TrayGroups) · [下载最新版本](https://github.com/crli-idea/TrayGroups/releases/latest)
+
+SSH 地址：`git@github.com:crli-idea/TrayGroups.git`
+
 1.5.1 修复设置窗口标题栏 X 和 Alt+F4 的关闭处理，关闭后丢弃未应用修改并释放窗口资源，托盘程序继续运行；“恢复全部图标”同时同步设置页的折叠开关。首次点击“打开保存目录”会先创建目标目录。设置页全部 13 个可见按钮/复选框、T 面板的 3 个按钮、详情/规则管理子窗口和五个页面的关闭入口均纳入本地交互回归。
 
 托盘只显示一个 T。左键打开系统 ListView 分组图标面板：各组按顺序展开，只显示已经隐藏的分组图标；未分组图标继续由 Windows 管理。支持原程序左键、双击、右键操作，以及系统滚动条、方向键、Home/End、Page Up/Down。Enter 执行所选图标的左键操作，菜单键或 Shift+F10 执行右键操作，Esc 关闭。
