@@ -2,9 +2,10 @@
 #include <windows.h>
 #include <cstdint>
 #include <string>
+#include "../common/NativeHandles.h"
 
 // 持久分组规则与运行时身份分开：PID、进程启动时间、窗口及编号只用于本次生命周期核验。
-// TrayItem::image 是拥有的 HICON 副本；扫描结果必须交给 FreeItems 释放，不能重复释放浅拷贝。
+// TrayItem::image 按值复制时复制图标，移动时转移所有权，析构自动释放。
 struct RuntimeIdentity {
     DWORD pid = 0;
     uint64_t started = 0;
@@ -24,7 +25,7 @@ struct TrayItem {
     int command = 0;
     BYTE state = 0;
     std::wstring process, path, tip, key, group, ownerClass;
-    HICON image = nullptr;
+    NativeHandles::Icon image;
     bool fallbackImage = false;
     RuntimeIdentity runtime;
     GUID guid = {};

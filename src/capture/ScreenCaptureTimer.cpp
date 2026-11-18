@@ -1,4 +1,4 @@
-// 截图实现：整十分钟调度、按天保存、多屏条带读取和 PNG 编码。
+// 截图实现：按当天零点对齐间隔、按天保存、多屏条带读取和 PNG 编码。
 // 宿主通过 CaptureTimer.h 调用；只在实际截图时创建临时工作线程。
 #ifndef UNICODE
 #define UNICODE
@@ -18,6 +18,7 @@
 #include "../common/DebugLog.h"
 #include "CaptureTimer.h"
 #include "../common/NativeResources.h"
+#include "../common/NativeHandles.h"
 
 namespace CaptureTimer {
 
@@ -27,11 +28,13 @@ static const UINT IntegratedTimer = WM_APP + 30, IntegratedDone = WM_APP + 31;
 static UINT completionMessage = WorkerDone;
 struct Settings {
     std::wstring directory, format = L"HH-mm";
+    unsigned intervalMinutes = 10;
 };
 static Settings settings;
 static std::wstring root, configPath, lastError;
 static HWND mainWindow = nullptr, settingsWindow = nullptr, resourcesWindow = nullptr,
-            resourceLabel = nullptr, dirEdit = nullptr, formatEdit = nullptr;
+            resourceLabel = nullptr, dirEdit = nullptr, formatEdit = nullptr,
+            intervalEdit = nullptr;
 static HFONT font = nullptr;
 static std::atomic<bool> busy(false);
 static std::atomic<SIZE_T> capturePeak(0);
@@ -63,29 +66,27 @@ static bool WriteAll(HANDLE h, const void *p, DWORD n) {
     return WriteFile(h, p, n, &wrote, nullptr) && wrote == n;
 }
 static bool TextFile(const std::wstring &path, const std::wstring &text) {
-    HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
-                           FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE)
+    NativeHandles::Handle h(CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (!h)
         return false;
     auto b = Utf8(text);
     bool ok = WriteAll(h, b.data(), b.size());
-    CloseHandle(h);
     return ok;
 }
 static std::wstring ReadFileText(const std::wstring &path) {
-    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE)
+    NativeHandles::Handle h(CreateFileW(path.c_str(), GENERIC_READ,
+                                        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+                                        FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (!h)
         return L"";
     DWORD size = GetFileSize(h, nullptr);
     if (size > 1024 * 1024) {
-        CloseHandle(h);
         return L"";
     }
     std::string b(size, 0);
     DWORD n = 0;
     ReadFile(h, b.empty() ? nullptr : &b[0], size, &n, nullptr);
-    CloseHandle(h);
     b.resize(n);
     return Wide(b);
 }
@@ -148,13 +149,12 @@ static void Log(const std::wstring &message) {
     wchar_t stamp[64];
     swprintf_s(stamp, L"%04u-%02u-%02u %02u:%02u:%02u ", t.wYear, t.wMonth, t.wDay, t.wHour,
                t.wMinute, t.wSecond);
-    HANDLE h = CreateFileW((root + L"\\activity.log").c_str(), FILE_APPEND_DATA,
-                           FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
-                           FILE_ATTRIBUTE_NORMAL, nullptr);
+    NativeHandles::Handle h(CreateFileW((root + L"\\activity.log").c_str(), FILE_APPEND_DATA,
+                                        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_ALWAYS,
+                                        FILE_ATTRIBUTE_NORMAL, nullptr));
     if (h != INVALID_HANDLE_VALUE) {
         auto s = Utf8(stamp + message + L"\r\n");
         WriteAll(h, s.data(), s.size());
-        CloseHandle(h);
     }
 #endif
 }
@@ -191,12 +191,19 @@ static ULONGLONG Now() {
     GetLocalTime(&t);
     return Ticks(t);
 }
+static bool ValidInterval(unsigned minutes) {
+    return minutes >= 1 && minutes <= 1440;
+}
 static ULONGLONG Next(ULONGLONG ticks) {
     SYSTEMTIME t = FromTicks(ticks);
+    unsigned minutes = t.wHour * 60 + t.wMinute;
+    unsigned interval = ValidInterval(settings.intervalMinutes) ? settings.intervalMinutes : 10;
+    unsigned next = (minutes / interval + 1) * interval;
+    // 每天从当地零点重新对齐；间隔不整除一天时，最后一段止于次日零点。
     t.wMilliseconds = 0;
     t.wSecond = 0;
-    t.wMinute = t.wMinute / 10 * 10;
-    return Ticks(t) + 600ULL * 10000000ULL;
+    t.wMinute = t.wHour = 0;
+    return Ticks(t) + std::min(next, 1440u) * 60ULL * 10000000ULL;
 }
 static std::wstring FormatName(const std::wstring &format, const SYSTEMTIME &t) {
     const std::wstring f = format.empty() ? L"HH-mm" : format;
@@ -267,15 +274,37 @@ static void Load() {
     std::wstring text = ReadFileText(configPath);
     settings.directory = JsonValue(text, L"OutputDirectory");
     settings.format = JsonValue(text, L"FileNameFormat");
+    settings.intervalMinutes = 10;
+    size_t intervalAt = text.find(L"\"IntervalMinutes\"");
+    if (intervalAt != std::wstring::npos) {
+        size_t colon = text.find(L':', intervalAt + 17);
+        if (colon != std::wstring::npos) {
+            const wchar_t *begin = text.c_str() + colon + 1;
+            while (iswspace(*begin))
+                ++begin;
+            wchar_t *end = nullptr;
+            unsigned long value = wcstoul(begin, &end, 10);
+            while (end && iswspace(*end))
+                ++end;
+            if (*begin >= L'0' && *begin <= L'9' && end != begin && end &&
+                (*end == L',' || *end == L'}') && value <= 1440 && ValidInterval(value))
+                settings.intervalMinutes = (unsigned)value;
+            else
+                Log(L"CONFIG invalid IntervalMinutes; using 10");
+        }
+    }
     if (settings.directory.empty())
         settings.directory = root + L"\\Captures";
     if (settings.format.empty())
         settings.format = L"HH-mm";
 }
 static bool Save(const Settings &s) {
+    if (!ValidInterval(s.intervalMinutes))
+        return false;
     std::wstring tmp = configPath + L".tmp";
     return TextFile(tmp, L"{\"OutputDirectory\":" + Json(s.directory) + L",\"FileNameFormat\":" +
-                             Json(s.format) + L"}\n") &&
+                             Json(s.format) + L",\"IntervalMinutes\":" +
+                             std::to_wstring(s.intervalMinutes) + L"}\n") &&
            MoveFileExW(tmp.c_str(), configPath.c_str(),
                        MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
 }
@@ -396,7 +425,10 @@ static bool EncodeDesktop(HANDLE file, const std::vector<Monitor> &monitors, REC
         stride = (width * 3 + 3) & ~3;
     if (width <= 0 || height <= 0 || width > 30000 || height > 30000)
         return false;
-    HDC desktop = GetDC(nullptr), memory = CreateCompatibleDC(desktop);
+    NativeHandles::ScreenDC desktop;
+    NativeHandles::MemoryDC memory(desktop);
+    if (!desktop || !memory)
+        return false;
     BITMAPINFO info = {};
     info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
     info.bmiHeader.biWidth = width;
@@ -405,13 +437,13 @@ static bool EncodeDesktop(HANDLE file, const std::vector<Monitor> &monitors, REC
     info.bmiHeader.biBitCount = 24;
     info.bmiHeader.biCompression = BI_RGB;
     void *pixels = nullptr;
-    HBITMAP bitmap = CreateDIBSection(desktop, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
-    if (!bitmap) {
-        DeleteDC(memory);
-        ReleaseDC(nullptr, desktop);
+    NativeHandles::GdiObject bitmap(
+        CreateDIBSection(desktop, &info, DIB_RGB_COLORS, &pixels, nullptr, 0));
+    if (!bitmap || !pixels)
         return false;
-    }
-    HGDIOBJ old = SelectObject(memory, bitmap);
+    NativeHandles::Selection selected(memory, bitmap);
+    if (!selected.Valid())
+        return false;
     bool ok = true;
     {
         PngWriter writer(file);
@@ -441,10 +473,6 @@ static bool EncodeDesktop(HANDLE file, const std::vector<Monitor> &monitors, REC
             ok = writer.Finish();
         SampleCapture();
     }
-    SelectObject(memory, old);
-    DeleteObject(bitmap);
-    DeleteDC(memory);
-    ReleaseDC(nullptr, desktop);
     return ok;
 }
 static bool Capture(const Settings &s) {
@@ -471,23 +499,23 @@ static bool Capture(const Settings &s) {
         Log(L"CAPTURE ERROR " + lastError);
         return false;
     }
-    HANDLE file = INVALID_HANDLE_VALUE;
+    NativeHandles::Handle file;
     std::wstring path;
     for (unsigned n = 0; n < 10000; n++) {
         path = dir + L"\\" + name + (n ? L"_" + std::to_wstring(n + 1) : L"") + L".png";
         file = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_NEW,
                            FILE_ATTRIBUTE_NORMAL, nullptr);
-        if (file != INVALID_HANDLE_VALUE)
+        if (file)
             break;
         if (GetLastError() != ERROR_FILE_EXISTS && GetLastError() != ERROR_ALREADY_EXISTS)
             break;
     }
-    if (file == INVALID_HANDLE_VALUE) {
+    if (!file) {
         Log(L"ERROR cannot create PNG path=" + path + L" win32=" + std::to_wstring(GetLastError()));
         return false;
     }
     bool ok = EncodeDesktop(file, monitors, bounds);
-    CloseHandle(file);
+    file.Reset();
     if (!ok) {
         DeleteFileW(path.c_str());
         Log(L"CAPTURE ERROR encoding failed");
@@ -630,12 +658,22 @@ static void ShowResources() {
 }
 static LRESULT CALLBACK SettingsProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     if (msg == WM_COMMAND && LOWORD(w) == 1) {
-        wchar_t dir[32768], format[256];
+        wchar_t dir[32768], format[256], interval[32];
         GetWindowTextW(dirEdit, dir, 32768);
         GetWindowTextW(formatEdit, format, 256);
+        GetWindowTextW(intervalEdit, interval, 32);
         Settings changed;
         changed.directory = Trim(dir);
         changed.format = Trim(format);
+        std::wstring intervalText = Trim(interval);
+        bool digits = !intervalText.empty() && intervalText.size() <= 4 &&
+                      std::all_of(intervalText.begin(), intervalText.end(),
+                                  [](wchar_t c) { return c >= L'0' && c <= L'9'; });
+        changed.intervalMinutes = digits ? (unsigned)_wtoi(intervalText.c_str()) : 0;
+        if (!ValidInterval(changed.intervalMinutes)) {
+            MessageBoxW(h, L"截图间隔请输入 1 到 1440 分钟。", L"设置", MB_ICONWARNING);
+            return 0;
+        }
         SYSTEMTIME t;
         GetLocalTime(&t);
         if (changed.directory.size() < 3 ||
@@ -651,6 +689,8 @@ static LRESULT CALLBACK SettingsProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             return 0;
         }
         settings = changed;
+        previousTime = Now();
+        nextTime = Next(previousTime);
         DestroyWindow(h);
         return 0;
     }
@@ -672,7 +712,7 @@ static void ShowSettings() {
     }
     settingsWindow =
         CreateWindowExW(WS_EX_APPWINDOW, L"Crli.Capture.Settings", L"定时双屏截图 · 设置",
-                        WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, 660, 265, nullptr,
+                        WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, 660, 325, nullptr,
                         nullptr, GetModuleHandleW(nullptr), nullptr);
     CaptureControl(settingsWindow, L"STATIC", L"保存根目录（粘贴完整路径；自动在下面按天建文件夹）",
                    0, 15, 15, 620, 22, 0);
@@ -682,10 +722,17 @@ static void ShowSettings() {
                    15, 88, 615, 22, 0);
     formatEdit = CaptureControl(settingsWindow, L"EDIT", settings.format.c_str(),
                                 WS_BORDER | ES_AUTOHSCROLL, 15, 116, 615, 28, 11);
-    CaptureControl(settingsWindow, L"BUTTON", L"资源占用", BS_PUSHBUTTON, 15, 169, 110, 30, 2);
-    CaptureControl(settingsWindow, L"BUTTON", L"保存", BS_DEFPUSHBUTTON, 510, 169, 120, 30, 1);
+    CaptureControl(settingsWindow, L"STATIC", L"截图间隔（分钟）：", 0, 15, 164, 160, 22, 0);
+    intervalEdit =
+        CaptureControl(settingsWindow, L"EDIT", std::to_wstring(settings.intervalMinutes).c_str(),
+                       WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL, 180, 160, 75, 28, 12);
+    SendMessageW(intervalEdit, EM_SETLIMITTEXT, 4, 0);
+    CaptureControl(settingsWindow, L"STATIC", L"1–1440；按每天零点对齐，默认 10", 0, 270, 164, 360,
+                   22, 0);
+    CaptureControl(settingsWindow, L"BUTTON", L"资源占用", BS_PUSHBUTTON, 15, 229, 110, 30, 2);
+    CaptureControl(settingsWindow, L"BUTTON", L"保存", BS_DEFPUSHBUTTON, 510, 229, 120, 30, 1);
     ShowWindow(settingsWindow, SW_RESTORE);
-    SetWindowPos(settingsWindow, HWND_TOP, 40, 40, 660, 265, SWP_SHOWWINDOW);
+    SetWindowPos(settingsWindow, HWND_TOP, 40, 40, 660, 325, SWP_SHOWWINDOW);
     SetForegroundWindow(settingsWindow);
 }
 static void Notification(bool add) {
@@ -754,7 +801,8 @@ static void Menu() {
     HMENU m = CreatePopupMenu();
     SYSTEMTIME t = FromTicks(nextTime);
     wchar_t status[80];
-    swprintf_s(status, L"下次截图：%02u:%02u（每 10 分钟整点）", t.wHour, t.wMinute);
+    swprintf_s(status, L"下次截图：%02u:%02u（每 %u 分钟，按零点对齐）", t.wHour, t.wMinute,
+               settings.intervalMinutes);
     AppendMenuW(m, MF_STRING | MF_DISABLED, 0, status);
     AppendMenuW(m, MF_STRING, 1, L"立即截图");
     AppendMenuW(m, MF_STRING | (paused ? MF_CHECKED : 0), 2, L"暂停截图");
@@ -989,7 +1037,8 @@ void AddMenu(HMENU parent) {
     HMENU submenu = CreatePopupMenu();
     SYSTEMTIME t = FromTicks(nextTime);
     wchar_t status[80];
-    swprintf_s(status, L"下次截图：%02u:%02u（每 10 分钟）", t.wHour, t.wMinute);
+    swprintf_s(status, L"下次截图：%02u:%02u（每 %u 分钟）", t.wHour, t.wMinute,
+               settings.intervalMinutes);
     AppendMenuW(submenu, MF_STRING | MF_DISABLED, 0, status);
     AppendMenuW(submenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(submenu, MF_STRING, CaptureNowCommand, L"立即截图");

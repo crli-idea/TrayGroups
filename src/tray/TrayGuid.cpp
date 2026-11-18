@@ -32,12 +32,11 @@ struct TrayNotify : IUnknown {
     virtual HRESULT STDMETHODCALLTYPE UnregisterCallback(ULONG cookie) = 0;
 };
 unsigned long long ProcessStarted(DWORD pid) {
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    NativeHandles::Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (!process)
         return 0;
     FILETIME created, exited, kernel, user;
     bool ok = GetProcessTimes(process, &created, &exited, &kernel, &user) != FALSE;
-    CloseHandle(process);
     return ok ? ((unsigned long long)created.dwHighDateTime << 32) | created.dwLowDateTime : 0;
 }
 class Callback final : public NotifyCallback {
@@ -142,13 +141,12 @@ bool FindLiveAddress(const Snapshot &snapshot, HWND owner, UINT id, const std::w
     auto started = ProcessStarted(pid);
     if (!started)
         return false;
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    NativeHandles::Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (!process)
         return false;
     wchar_t realPath[32768];
     DWORD length = 32768;
     bool queried = QueryFullProcessImageNameW(process, 0, realPath, &length) != FALSE;
-    CloseHandle(process);
     auto expected = TraySupport::Lower(executable);
     if (!queried || TraySupport::Lower(std::wstring(realPath, length)) != expected)
         return false;

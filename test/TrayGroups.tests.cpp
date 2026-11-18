@@ -41,7 +41,7 @@ static int SelfTest() {
     // Exercise popup handlers directly against isolated icons, including deferred
     // single-click and WM_CONTEXTMENU for v4. The test popup stays invisible.
     for(auto& i:own)if(i.owner==h&&(i.id==401||i.id==402)){
-        items.push_back(i);items.back().image=CopyIcon(i.image);
+        items.push_back(i);
     }
     if(items.size()==2){
         bool matched=CommandMatches(items[0])&&CommandMatches(items[1]);
@@ -357,6 +357,8 @@ static bool GuidRegression(std::wstring& report) {
     return ok;
 }
 
+#include "TrayInspector.tests.h"
+
 static int UiSelfTest() {
     INITCOMMONCONTROLSEX common={sizeof(common),ICC_LISTVIEW_CLASSES|ICC_TAB_CLASSES};InitCommonControlsEx(&common);
     NONCLIENTMETRICSW metrics={};metrics.cbSize=sizeof(metrics);SystemParametersInfoW(SPI_GETNONCLIENTMETRICS,sizeof(metrics),&metrics,0);appFont=CreateFontIndirectW(&metrics.lfMessageFont);appIcon=MakeAppIcon();
@@ -366,6 +368,7 @@ static int UiSelfTest() {
     configPath=baseDir+L"\\ui-test-config.ini";settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();settingsConfig.groupLabelSizes.clear();settingsConfig.groupLabelWidths.clear();settingsConfig.groupLabelHeights.clear();settingsConfig.iconMatch=L"path-class-id";settingsConfig.haveSettingsPosition=false;
     if(!HiddenPopupRegression(report))ok=false;
     if(!GuidRegression(report))ok=false;
+    if(!InspectorRegression(report))ok=false;
     configPath=baseDir+L"\\ui-test-config.ini";settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();settingsConfig.groupLabelSizes.clear();settingsConfig.groupLabelWidths.clear();settingsConfig.groupLabelHeights.clear();settingsConfig.foldIcons=false;settingsConfig.iconMatch=L"path-class-id";settingsConfig.haveSettingsPosition=false;
     ShowSettings();check(settingsWindow&&IsWindowVisible(settingsWindow)&&ListView_GetItemCount(listWindow)>0,L"settings window visible with detected program icons");
     if(!settingsWindow||ListView_GetItemCount(listWindow)==0){WriteText(baseDir+L"\\ui-self-test.txt",report);return 1;}
@@ -403,17 +406,17 @@ static int UiSelfTest() {
     }
     SelectSettingsPage(1);SelectSettingsPage(2);SelectSettingsPage(0);
     check(ControlText(groupEdit)==L"测试分组"&&groupEditing,L"switching tabs preserves unsaved Chinese group input");
-    check(ApplyGroupEdit()&&matcher.GroupFor(a)==L"测试分组"&&matcher.GroupFor(b).empty()&&matcher.GroupFor(d).empty()&&settingsConfig.programAssignments.empty(),L"default edit changes only selected explorer icon");
+    check(ApplyGroupEdit()&&settingsMatcher.GroupFor(a)==L"测试分组"&&settingsMatcher.GroupFor(b).empty()&&settingsMatcher.GroupFor(d).empty()&&settingsDraft.programAssignments.empty(),L"default edit changes only selected explorer icon");
     SetWindowTextW(appearanceGroup,L"测试分组");UpdateLabelSize();
     SetWindowTextW(labelSizeEdit,L"24");SetWindowTextW(labelWidthEdit,L"320");SetWindowTextW(labelHeightEdit,L"90");SendMessageW(settingsWindow,WM_COMMAND,MAKEWPARAM(115,EN_CHANGE),(LPARAM)labelSizeEdit);
-    check(SaveLabelSize()&&settingsConfig.GroupLabelSize(L"测试分组")==24&&settingsConfig.GroupLabelWidth(L"测试分组")==320&&settingsConfig.GroupLabelHeight(L"测试分组")==90,L"per-group label size saved from the settings editor");
+    check(SaveLabelSize()&&settingsDraft.GroupLabelSize(L"测试分组")==24&&settingsDraft.GroupLabelWidth(L"测试分组")==320&&settingsDraft.GroupLabelHeight(L"测试分组")==90,L"per-group label size saved from the settings editor");
     SetWindowTextW(appearanceGroup,L"独立外观");UpdateLabelSize();SetWindowTextW(labelSizeEdit,L"18");
     SetWindowTextW(appearanceGroup,L"下一个组");SendMessageW(settingsWindow,WM_COMMAND,MAKEWPARAM(IDC_APPEARANCE_GROUP,CBN_EDITCHANGE),(LPARAM)appearanceGroup);
-    check(settingsConfig.GroupLabelSize(L"独立外观")==18&&ControlText(groupEdit)==L"测试分组"&&!groupEditing,L"appearance group changes retain edits without changing icon assignments");
+    check(settingsDraft.GroupLabelSize(L"独立外观")==18&&ControlText(groupEdit)==L"测试分组"&&!groupEditing,L"appearance group changes retain edits without changing icon assignments");
     SetWindowTextW(appearanceGroup,L"测试分组");UpdateLabelSize();
-    SendMessageW(scopeEdit,CB_SETCURSEL,1,0);SetWindowTextW(groupEdit,L"路径分组");check(ApplyGroupEdit()&&matcher.GroupFor(a)==L"路径分组"&&matcher.GroupFor(b)==L"路径分组"&&matcher.GroupFor(d).empty(),L"path scope groups same path without affecting another explorer installation");
-    SendMessageW(scopeEdit,CB_SETCURSEL,0,0);SetWindowTextW(groupEdit,L"");check(ApplyGroupEdit()&&matcher.GroupFor(a).empty()&&matcher.GroupFor(b)==L"路径分组",L"single-icon ungroup excludes it from an inherited path rule");
-    check(SaveSettings(),L"group configuration saved");
+    SendMessageW(scopeEdit,CB_SETCURSEL,1,0);SetWindowTextW(groupEdit,L"路径分组");check(ApplyGroupEdit()&&settingsMatcher.GroupFor(a)==L"路径分组"&&settingsMatcher.GroupFor(b)==L"路径分组"&&settingsMatcher.GroupFor(d).empty(),L"path scope groups same path without affecting another explorer installation");
+    SendMessageW(scopeEdit,CB_SETCURSEL,0,0);SetWindowTextW(groupEdit,L"");check(ApplyGroupEdit()&&settingsMatcher.GroupFor(a).empty()&&settingsMatcher.GroupFor(b)==L"路径分组",L"single-icon ungroup excludes it from an inherited path rule");
+    check(settingsDraft.Save(configPath),L"group configuration saved");
     settingsConfig.settingsX=140;settingsConfig.settingsY=100;settingsConfig.haveSettingsPosition=true;RECT expected=SettingsRect();SetWindowPos(settingsWindow,nullptr,expected.left,expected.top,0,0,SWP_NOSIZE|SWP_NOZORDER);
     RememberSettingsPosition(settingsWindow);
     auto beforeClose=ReadText(configPath);SetWindowTextW(groupEdit,L"不保存的分组");ApplyGroupEdit();
@@ -490,7 +493,7 @@ static int UiSelfTest() {
     auto memory=NativeResources::Read();report+=L"PrivateWorkingSetBytes="+Number(memory.privateWorking)+L"\n";
     WriteText(baseDir+L"\\ui-self-test.txt",report);
     WriteText(baseDir+L"\\ui-self-test-"+Number(testDpi)+L".txt",report);
-    DestroyIcon(appIcon);appIcon=nullptr;DeleteObject(appFont);appFont=nullptr;return ok?0:1;
+    appIcon=nullptr;DeleteObject(appFont);appFont=nullptr;return ok?0:1;
 }
 
 int WINAPI wWinMain(HINSTANCE,HINSTANCE,LPWSTR command,int) {

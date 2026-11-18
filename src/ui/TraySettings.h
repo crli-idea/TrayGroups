@@ -2,8 +2,12 @@
 // 分组/外观编辑先留在界面状态，点“应用”才保存；关闭只合并窗口位置。
 #pragma once
 #include "TraySettingsIds.h"
+#include "TrayInspector.h"
 #include <uxtheme.h>
 
+static TrayConfig::Settings settingsDraft;
+static TrayIdentity::MatchState settingsMatchState;
+static TrayIdentity::Matcher settingsMatcher(settingsDraft, settingsMatchState);
 static HWND settingsTabs = nullptr, settingsPages[3] = {}, appearanceGroup = nullptr;
 static std::wstring appearanceName;
 static int settingsWidth = 1000, settingsHeight = 680;
@@ -14,7 +18,17 @@ static std::wstring ControlText(HWND control) {
     return Trim(text);
 }
 static void FillGroupChoices() {
-    auto groups = GroupNames();
+    std::set<std::wstring> groups;
+    for (const auto *rules : {&settingsDraft.assignments, &settingsDraft.pathAssignments,
+                              &settingsDraft.programAssignments})
+        for (const auto &rule : *rules)
+            if (!rule.second.empty())
+                groups.insert(rule.second);
+    for (const auto *sizes : {&settingsDraft.groupLabelSizes, &settingsDraft.groupLabelWidths,
+                              &settingsDraft.groupLabelHeights})
+        for (const auto &entry : *sizes)
+            if (!entry.first.empty())
+                groups.insert(entry.first);
     for (HWND combo : {groupEdit, appearanceGroup}) {
         auto text = ControlText(combo);
         SendMessageW(combo, CB_RESETCONTENT, 0, 0);
@@ -38,10 +52,9 @@ static void UpdateLabelSize() {
     fillingSettings = true;
     std::wstring group = Trim(name);
     appearanceName = group;
-    SetWindowTextW(labelSizeEdit, std::to_wstring(settingsConfig.GroupLabelSize(group)).c_str());
-    SetWindowTextW(labelWidthEdit, std::to_wstring(settingsConfig.GroupLabelWidth(group)).c_str());
-    SetWindowTextW(labelHeightEdit,
-                   std::to_wstring(settingsConfig.GroupLabelHeight(group)).c_str());
+    SetWindowTextW(labelSizeEdit, std::to_wstring(settingsDraft.GroupLabelSize(group)).c_str());
+    SetWindowTextW(labelWidthEdit, std::to_wstring(settingsDraft.GroupLabelWidth(group)).c_str());
+    SetWindowTextW(labelHeightEdit, std::to_wstring(settingsDraft.GroupLabelHeight(group)).c_str());
     labelEditing = false;
     fillingSettings = previous;
 }
@@ -51,6 +64,7 @@ static void FillSettings() {
     ListView_DeleteAllItems(listWindow);
     FreeItems(settingsItems);
     settingsItems = ReadTray();
+    settingsMatcher.ResolveGroups(settingsItems);
     if (settingsImages) {
         ListView_SetImageList(listWindow, nullptr, LVSIL_SMALL);
         ImageList_Destroy(settingsImages);
@@ -64,7 +78,6 @@ static void FillSettings() {
         if (i.fallbackImage && !i.path.empty()) {
             HICON extracted = nullptr;
             if (ExtractIconExW(i.path.c_str(), 0, nullptr, &extracted, 1) && extracted) {
-                DestroyIcon(i.image);
                 i.image = extracted;
                 i.fallbackImage = false;
             }
@@ -82,7 +95,7 @@ static void FillSettings() {
         ListView_SetItemText(listWindow, n, 3, (LPWSTR)i.path.c_str());
         std::wstring status = i.matchStatus;
         if (!i.group.empty() && !i.pending)
-            status += !settingsConfig.foldIcons    ? L"；折叠已暂停"
+            status += !settingsDraft.foldIcons     ? L"；折叠已暂停"
                       : !i.addressKnown            ? L"；未取得注册信息，保持原状"
                       : (i.state & TBSTATE_HIDDEN) ? L"；已隐藏"
                                                    : L"；仍显示在 Windows";
@@ -94,12 +107,12 @@ static void FillSettings() {
     InvalidateRect(listWindow, nullptr, TRUE);
     FillGroupChoices();
     SendMessageW(matchEdit, CB_SETCURSEL,
-                 settingsConfig.iconMatch == L"path-guid"        ? 3
-                 : settingsConfig.iconMatch == L"path-id"        ? 1
-                 : settingsConfig.iconMatch == L"path-class-tip" ? 2
-                                                                 : 0,
+                 settingsDraft.iconMatch == L"path-guid"        ? 3
+                 : settingsDraft.iconMatch == L"path-id"        ? 1
+                 : settingsDraft.iconMatch == L"path-class-tip" ? 2
+                                                                : 0,
                  0);
-    SendMessageW(foldCheck, BM_SETCHECK, settingsConfig.foldIcons ? BST_CHECKED : BST_UNCHECKED, 0);
+    SendMessageW(foldCheck, BM_SETCHECK, settingsDraft.foldIcons ? BST_CHECKED : BST_UNCHECKED, 0);
     SetWindowTextW(groupEdit, L"");
     groupEditing = false;
     UpdateLabelSize();
@@ -112,10 +125,10 @@ static bool ApplyGroupEdit() {
     std::wstring group = Trim(text);
     int scope = (int)SendMessageW(scopeEdit, CB_GETCURSEL, 0, 0),
         match = (int)SendMessageW(matchEdit, CB_GETCURSEL, 0, 0);
-    settingsConfig.iconMatch = match == 3   ? L"path-guid"
-                               : match == 1 ? L"path-id"
-                               : match == 2 ? L"path-class-tip"
-                                            : L"path-class-id";
+    settingsDraft.iconMatch = match == 3   ? L"path-guid"
+                              : match == 1 ? L"path-id"
+                              : match == 2 ? L"path-class-tip"
+                                           : L"path-class-id";
     std::vector<int> selected;
     while ((row = ListView_GetNextItem(listWindow, row, LVNI_SELECTED)) != -1)
         selected.push_back(row);
@@ -128,10 +141,10 @@ static bool ApplyGroupEdit() {
             }
     if (scope <= 0)
         for (int n : selected) {
-            auto key = IconKey(settingsItems[n], settingsConfig.iconMatch);
+            auto key = IconKey(settingsItems[n], settingsDraft.iconMatch);
             unsigned count = 0;
             for (const auto &i : settingsItems)
-                if (IconKey(i, settingsConfig.iconMatch) == key)
+                if (IconKey(i, settingsDraft.iconMatch) == key)
                     count++;
             if (key.empty() || count > 1) {
                 MessageBoxW(settingsWindow,
@@ -147,11 +160,11 @@ static bool ApplyGroupEdit() {
         bool valid = true;
         for (int n : selected) {
             const auto &old = settingsItems[n];
-            auto key = IconKey(old, settingsConfig.iconMatch);
+            auto key = IconKey(old, settingsDraft.iconMatch);
             unsigned matches = 0;
             bool same = false;
             for (const auto &item : live) {
-                if (IconKey(item, settingsConfig.iconMatch) == key)
+                if (IconKey(item, settingsDraft.iconMatch) == key)
                     matches++;
                 if (SameRuntime(old, item))
                     same = true;
@@ -170,37 +183,37 @@ static bool ApplyGroupEdit() {
         auto &selectedItem = settingsItems[n];
         std::wstring path = Lower(selectedItem.path), program = Lower(selectedItem.process);
         if (scope <= 0) {
-            for (const auto &key : matcher.IconKeys(selectedItem))
-                matcher.ForgetRule(key);
-            auto key = IconKey(selectedItem, settingsConfig.iconMatch);
-            settingsConfig.assignments[key] = group;
+            for (const auto &key : settingsMatcher.IconKeys(selectedItem))
+                settingsMatcher.ForgetRule(key);
+            auto key = IconKey(selectedItem, settingsDraft.iconMatch);
+            settingsDraft.assignments[key] = group;
             if (selectedItem.runtime.Valid())
-                matchState.ruleBindings[key] = selectedItem.runtime;
+                settingsMatchState.ruleBindings[key] = selectedItem.runtime;
         } else {
-            for (auto it = settingsConfig.assignments.begin();
-                 it != settingsConfig.assignments.end();) {
+            for (auto it = settingsDraft.assignments.begin();
+                 it != settingsDraft.assignments.end();) {
                 std::wstring savedPath = RulePath(it->first);
                 if (scope == 1 ? savedPath == path : FileName(savedPath) == program) {
-                    matchState.pendingRules.erase(it->first);
-                    matchState.ruleBindings.erase(it->first);
-                    it = settingsConfig.assignments.erase(it);
+                    settingsMatchState.pendingRules.erase(it->first);
+                    settingsMatchState.ruleBindings.erase(it->first);
+                    it = settingsDraft.assignments.erase(it);
                 } else
                     ++it;
             }
             if (scope == 1)
-                settingsConfig.pathAssignments[path] = group;
+                settingsDraft.pathAssignments[path] = group;
             else {
-                for (auto it = settingsConfig.pathAssignments.begin();
-                     it != settingsConfig.pathAssignments.end();)
+                for (auto it = settingsDraft.pathAssignments.begin();
+                     it != settingsDraft.pathAssignments.end();)
                     if (FileName(it->first) == program)
-                        it = settingsConfig.pathAssignments.erase(it);
+                        it = settingsDraft.pathAssignments.erase(it);
                     else
                         ++it;
-                settingsConfig.programAssignments[program] = group;
+                settingsDraft.programAssignments[program] = group;
             }
         }
     }
-    matcher.ResolveGroups(settingsItems);
+    settingsMatcher.ResolveGroups(settingsItems);
     for (size_t n = 0; n < settingsItems.size(); n++)
         ListView_SetItemText(listWindow, n, 2, (LPWSTR)settingsItems[n].group.c_str());
     groupEditing = false;
@@ -225,9 +238,9 @@ static bool SaveLabelSize() {
         return false;
     }
     std::wstring group = appearanceName;
-    settingsConfig.groupLabelSizes[group] = points;
-    settingsConfig.groupLabelWidths[group] = width;
-    settingsConfig.groupLabelHeights[group] = height;
+    settingsDraft.groupLabelSizes[group] = points;
+    settingsDraft.groupLabelWidths[group] = width;
+    settingsDraft.groupLabelHeights[group] = height;
     labelEditing = false;
     return true;
 }
@@ -245,16 +258,23 @@ static bool ApplySettings(HWND h) {
     if (labelEditing && !SaveLabelSize())
         return false;
     int mode = (int)SendMessageW(matchEdit, CB_GETCURSEL, 0, 0);
-    settingsConfig.iconMatch = mode == 3   ? L"path-guid"
-                               : mode == 1 ? L"path-id"
-                               : mode == 2 ? L"path-class-tip"
-                                           : L"path-class-id";
-    settingsConfig.foldIcons = SendMessageW(foldCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
-    if (!SaveSettings()) {
+    settingsDraft.iconMatch = mode == 3   ? L"path-guid"
+                              : mode == 1 ? L"path-id"
+                              : mode == 2 ? L"path-class-tip"
+                                          : L"path-class-id";
+    settingsDraft.foldIcons = SendMessageW(foldCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    settingsDraft.settingsX = settingsConfig.settingsX;
+    settingsDraft.settingsY = settingsConfig.settingsY;
+    settingsDraft.haveSettingsPosition = settingsConfig.haveSettingsPosition;
+    settingsDraft.debugLogging = DebugLog::enabled.load();
+    if (!settingsDraft.Save(configPath)) {
         MessageBoxW(h, L"配置保存失败，尚未应用。", L"TrayGroups", MB_ICONERROR);
         return false;
     }
+    settingsConfig = settingsDraft;
+    matchState = settingsMatchState;
     Refresh(true);
+    settingsMatchState = matchState;
     FillSettings();
     SetWindowTextW(h, L"TrayGroups 设置 · 已应用");
     return true;
@@ -271,6 +291,32 @@ static INT_PTR CALLBACK SettingsPageProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
 static INT_PTR CALLBACK SettingsProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     if (msg == WM_COMMAND) {
         int id = LOWORD(w), event = HIWORD(w);
+        if (id == IDC_ICON_DETAILS) {
+            int row = ListView_GetNextItem(listWindow, -1, LVNI_SELECTED);
+            if (row >= 0 && row < (int)settingsItems.size()) {
+                auto live = ReadTray(false);
+                auto current = std::find_if(live.begin(), live.end(), [&](const TrayItem &i) {
+                    return SameRuntime(i, settingsItems[row]);
+                });
+                if (current != live.end())
+                    TrayInspector::ShowIcon(h, *current, settingsConfig.iconMatch,
+                                            settingsConfig.foldIcons);
+                else
+                    MessageBoxW(h, L"图标已退出或重建，请重新打开设置刷新列表。", L"图标详情",
+                                MB_ICONINFORMATION);
+            } else
+                MessageBoxW(h, L"请先选择一个图标。", L"图标详情", MB_ICONINFORMATION);
+            return TRUE;
+        }
+        if (id == IDC_MANAGE_RULES) {
+            if ((groupEditing && !ApplyGroupEdit()) || (labelEditing && !SaveLabelSize()))
+                return TRUE;
+            if (TrayInspector::ManageRules(h, settingsDraft, settingsMatchState, ReadTray)) {
+                FillSettings();
+                SetWindowTextW(h, L"TrayGroups 设置 · 规则修改待应用");
+            }
+            return TRUE;
+        }
         if (id == IDC_GROUP && (event == CBN_EDITCHANGE || event == CBN_SELCHANGE)) {
             if (!fillingSettings) {
                 if (event == CBN_SELCHANGE)
@@ -361,15 +407,15 @@ static INT_PTR CALLBACK SettingsProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     return FALSE;
 }
 static RECT SettingsRect() {
-    RECT desired = {settingsConfig.settingsX, settingsConfig.settingsY,
-                    settingsConfig.settingsX + settingsWidth,
-                    settingsConfig.settingsY + settingsHeight};
+    RECT desired = {settingsDraft.settingsX, settingsDraft.settingsY,
+                    settingsDraft.settingsX + settingsWidth,
+                    settingsDraft.settingsY + settingsHeight};
     MONITORINFO monitor = {};
     monitor.cbSize = sizeof(monitor);
     GetMonitorInfoW(MonitorFromRect(&desired, MONITOR_DEFAULTTONEAREST), &monitor);
     RECT work = monitor.rcWork;
-    int x = settingsConfig.haveSettingsPosition ? settingsConfig.settingsX : work.left + 40,
-        y = settingsConfig.haveSettingsPosition ? settingsConfig.settingsY : work.top + 40;
+    int x = settingsDraft.haveSettingsPosition ? settingsDraft.settingsX : work.left + 40,
+        y = settingsDraft.haveSettingsPosition ? settingsDraft.settingsY : work.top + 40;
     x = std::max((int)work.left, std::min(x, (int)work.right - settingsWidth));
     y = std::max((int)work.top, std::min(y, (int)work.bottom - settingsHeight));
     return RECT{x, y, x + settingsWidth, y + settingsHeight};
@@ -381,6 +427,8 @@ static void ShowSettings() {
         SetForegroundWindow(settingsWindow);
         return;
     }
+    settingsDraft = settingsConfig;
+    settingsMatchState = matchState;
     HINSTANCE instance = GetModuleHandleW(nullptr);
     settingsWindow =
         CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_SETTINGS), nullptr, SettingsProc, 0);
@@ -451,7 +499,7 @@ static void ShowSettings() {
     if (!appIcon)
         appIcon = MakeAppIcon();
     for (int size : {ICON_BIG, ICON_SMALL})
-        SendMessageW(settingsWindow, WM_SETICON, size, (LPARAM)appIcon);
+        SendMessageW(settingsWindow, WM_SETICON, size, (LPARAM)(HICON)appIcon);
     RECT bounds;
     GetWindowRect(settingsWindow, &bounds);
     settingsWidth = bounds.right - bounds.left;

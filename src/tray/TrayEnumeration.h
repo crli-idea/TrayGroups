@@ -17,14 +17,13 @@ struct TrayScanContext {
         if (found != processes.end())
             return found->second;
         TrayProcessInfo info;
-        HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        NativeHandles::Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
         if (process) {
             info.started = ProcessStart(process);
             wchar_t path[32768];
             DWORD size = 32768;
             if (QueryFullProcessImageNameW(process, 0, path, &size))
                 info.path.assign(path, size);
-            CloseHandle(process);
         }
         return processes.emplace(pid, std::move(info)).first->second;
     }
@@ -40,12 +39,12 @@ static void ReadToolbar(HWND toolbar, TrayScanContext &scan) {
     auto &out = scan.items;
     DWORD pid = 0;
     GetWindowThreadProcessId(toolbar, &pid);
-    HANDLE process = OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ, FALSE, pid);
+    NativeHandles::Handle process(OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ, FALSE, pid));
     if (!process)
         return;
-    void *memory = VirtualAllocEx(process, nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    NativeHandles::RemoteBuffer buffer(process, 4096);
+    void *memory = buffer.Get();
     if (!memory) {
-        CloseHandle(process);
         return;
     }
     DWORD_PTR count = 0;
@@ -100,8 +99,6 @@ static void ReadToolbar(HWND toolbar, TrayScanContext &scan) {
             }
             out.push_back(std::move(item));
         }
-    VirtualFreeEx(process, memory, 0, MEM_RELEASE);
-    CloseHandle(process);
 }
 static BOOL CALLBACK ReadChild(HWND h, LPARAM p) {
     if (ClassOf(h) == L"ToolbarWindow32")
@@ -131,12 +128,8 @@ static std::vector<TrayItem> ReadTray(bool includeImages = true) {
         });
         if (match == result.end()) {
             result.push_back(std::move(item));
-            item.image = nullptr;
         } else if ((match->state & TBSTATE_HIDDEN) && !(item.state & TBSTATE_HIDDEN)) {
-            if (match->image)
-                DestroyIcon(match->image);
             *match = std::move(item);
-            item.image = nullptr;
         }
     }
     FreeItems(locations);

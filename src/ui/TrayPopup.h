@@ -307,7 +307,6 @@ static void FillPopupItems(const std::wstring &group) {
         if (item.fallbackImage && !item.path.empty()) {
             HICON extracted = nullptr;
             if (ExtractIconExW(item.path.c_str(), 0, nullptr, &extracted, 1) && extracted) {
-                DestroyIcon(item.image);
                 item.image = extracted;
                 item.fallbackImage = false;
             }
@@ -419,7 +418,6 @@ static void ShowGroup(const std::wstring &group) {
         if (i.fallbackImage && !i.path.empty()) {
             HICON extracted = nullptr;
             if (ExtractIconExW(i.path.c_str(), 0, nullptr, &extracted, 1) && extracted) {
-                DestroyIcon(i.image);
                 i.image = extracted;
                 i.fallbackImage = false;
             }

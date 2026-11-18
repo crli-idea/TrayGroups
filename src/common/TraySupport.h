@@ -1,6 +1,7 @@
 #pragma once
 #include <windows.h>
 #include <string>
+#include "NativeHandles.h"
 
 // 公共 UTF-8、路径及小型文本文件操作。这里只提供工具函数，不保存应用状态。
 namespace TraySupport {
@@ -38,30 +39,28 @@ inline std::wstring Wide(const std::string &s) {
     return r;
 }
 inline bool WriteText(const std::wstring &path, const std::wstring &text) {
-    HANDLE h = CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr, CREATE_ALWAYS,
-                           FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE)
+    NativeHandles::Handle h(CreateFileW(path.c_str(), GENERIC_WRITE, FILE_SHARE_READ, nullptr,
+                                        CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (!h)
         return false;
     std::string b = Utf8(text);
     DWORD n = 0;
     bool ok = WriteFile(h, b.data(), (DWORD)b.size(), &n, nullptr) && n == b.size();
-    CloseHandle(h);
     return ok;
 }
 inline std::wstring ReadText(const std::wstring &path) {
-    HANDLE h = CreateFileW(path.c_str(), GENERIC_READ, FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr,
-                           OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
-    if (h == INVALID_HANDLE_VALUE)
+    NativeHandles::Handle h(CreateFileW(path.c_str(), GENERIC_READ,
+                                        FILE_SHARE_READ | FILE_SHARE_WRITE, nullptr, OPEN_EXISTING,
+                                        FILE_ATTRIBUTE_NORMAL, nullptr));
+    if (!h)
         return L"";
     DWORD n = GetFileSize(h, nullptr);
     if (n > 1024 * 1024) {
-        CloseHandle(h);
         return L"";
     }
     std::string b(n, 0);
     DWORD got = 0;
     ReadFile(h, b.empty() ? nullptr : &b[0], n, &got, nullptr);
-    CloseHandle(h);
     b.resize(got);
     return Wide(b);
 }

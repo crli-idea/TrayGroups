@@ -1,6 +1,7 @@
 // 只链接配置和身份模块；不包含主程序，也不枚举/修改真实托盘图标。
 #include "../src/config/TrayConfig.h"
 #include "../src/tray/TrayIdentity.h"
+#include "../src/tray/TrayDiagnostics.h"
 #include "../src/common/TraySupport.h"
 #include <iostream>
 
@@ -98,6 +99,71 @@ int main() {
     guidIcon.guid.Data1++;list={guidIcon};guidMatcher.ResolveGroups(list);
     Check(list[0].group==L"整路径",
           "a changed GUID does not inherit the earlier per-icon assignment");
+    TrayConfig::Settings auditConfig;
+    TrayItem liveIcon=icon;liveIcon.path=ExePath();liveIcon.usesGuid=true;liveIcon.addressKnown=true;
+    liveIcon.guid={0x13572468,0x1234,0x5678,{1,2,3,4,5,6,7,8}};
+    auto currentKey=TrayIdentity::IconKey(liveIcon,L"path-guid");
+    auto oldIcon=liveIcon;oldIcon.guid.Data1++;
+    auto oldKey=TrayIdentity::IconKey(oldIcon,L"path-guid");
+    auditConfig.assignments[oldKey]=L"工具";
+    auto outdated=TrayDiagnostics::UnmatchedRules(auditConfig,{liveIcon});
+    Check(outdated.size()==1&&outdated[0].reason.find(L"已经变化")!=std::wstring::npos,
+          "diagnostics detects changed identity under an existing executable path");
+    std::wstring error;
+    auto draft=auditConfig;
+    bool rebound=outdated.size()==1&&TrayDiagnostics::Rebind(draft,outdated[0],liveIcon,{liveIcon},error);
+    Check(rebound&&draft.assignments[currentKey]==L"工具"&&!draft.assignments.count(oldKey)&&auditConfig.assignments.count(oldKey),
+          "rebind preserves group, removes old key and leaves original settings untouched");
+    auto duplicate=liveIcon;duplicate.owner=(HWND)303;duplicate.runtime.owner=duplicate.owner;
+    draft=auditConfig;
+    Check(!TrayDiagnostics::Rebind(draft,outdated[0],liveIcon,{liveIcon,duplicate},error)&&draft.assignments==auditConfig.assignments,
+          "ambiguous destination cannot be rebound or mutate the draft");
+    auto restarted=liveIcon;restarted.runtime.started++;
+    Check(!TrayDiagnostics::Rebind(draft,outdated[0],liveIcon,{restarted},error),
+          "a recreated destination is rejected before rebind");
+    draft.assignments[currentKey]=L"已有规则";
+    Check(!TrayDiagnostics::Rebind(draft,outdated[0],liveIcon,{liveIcon},error)&&draft.assignments[currentKey]==L"已有规则",
+          "rebind never overwrites an existing destination rule");
+    draft=auditConfig;draft.assignments[oldKey]=L"";
+    auto excluded=TrayDiagnostics::UnmatchedRules(draft,{liveIcon});
+    Check(excluded.size()==1&&TrayDiagnostics::Rebind(draft,excluded[0],liveIcon,{liveIcon},error)&&draft.assignments.count(currentKey)&&draft.assignments[currentKey].empty(),
+          "explicit ungroup exclusions survive rebind");
+    Check(TrayDiagnostics::UnmatchedRules(draft,{liveIcon}).empty(),
+          "an active per-icon rule is not listed as outdated");
+    draft.assignments[L"path-id|c:\\nonexistent-traygroups-test\\missing.exe|9"]=L"旧规则";
+    auto inactive=TrayDiagnostics::UnmatchedRules(draft,{liveIcon});
+    Check(inactive.size()==1&&inactive[0].reason.find(L"未启用")!=std::wstring::npos,
+          "inactive matching modes are explained instead of automatically migrated");
+    TrayDiagnostics::Remove(draft,inactive[0]);
+    auto details=TrayDiagnostics::IconDetails(liveIcon,L"path-guid",true);
+    Check(details.find(TrayIdentity::GuidKey(liveIcon.guid))!=std::wstring::npos&&details.find(currentKey)!=std::wstring::npos,
+          "icon details contain real GUID and the current exact matching key");
+    liveIcon.usesGuid=false;liveIcon.addressKnown=false;
+    Check(TrayDiagnostics::IconDetails(liveIcon,L"path-guid",true).find(L"未取得")!=std::wstring::npos,
+          "unknown registration is not falsely labelled as an icon without GUID");
+    HANDLE event=CreateEventW(nullptr,TRUE,FALSE,nullptr);
+    {NativeHandles::Handle first(event);NativeHandles::Handle second(std::move(first));Check(!first&&second,"handle move transfers sole ownership");}
+    DWORD flags=0;
+    Check(!GetHandleInformation(event,&flags),"handle is closed automatically on scope exit");
+    void* remote=nullptr;
+    {NativeHandles::RemoteBuffer buffer(GetCurrentProcess(),4096);remote=buffer.Get();}
+    MEMORY_BASIC_INFORMATION info={};
+    Check(remote&&VirtualQueryEx(GetCurrentProcess(),remote,&info,sizeof(info))&&info.State==MEM_FREE,
+          "remote allocation is released automatically");
+    DWORD iconBaseline=GetGuiResources(GetCurrentProcess(),GR_USEROBJECTS);
+    bool copied=false,moved=false;
+    {
+        TrayItem original;original.image=CopyIcon(LoadIconW(nullptr,MAKEINTRESOURCEW(32512)));
+        TrayItem copy=original;copied=copy.image&&copy.image!=original.image;
+        HICON transferred=copy.image;
+        TrayItem move=std::move(copy);moved=move.image==transferred&&!copy.image;
+        std::vector<TrayItem> owned={original,move};
+        original.image=nullptr;
+        ICONINFO imageInfo={};copied&=GetIconInfo(owned[0].image,&imageInfo)!=FALSE;
+        if(imageInfo.hbmColor)DeleteObject(imageInfo.hbmColor);if(imageInfo.hbmMask)DeleteObject(imageInfo.hbmMask);
+    }
+    Check(copied&&moved&&GetGuiResources(GetCurrentProcess(),GR_USEROBJECTS)==iconBaseline,
+          "icon copies own independent handles, moves transfer ownership and vector destruction leaks no icons");
     DeleteFileW(path.c_str());
     return passed?0:1;
 }

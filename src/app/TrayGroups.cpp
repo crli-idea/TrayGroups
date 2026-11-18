@@ -60,7 +60,7 @@ static HWND listWindow = nullptr, groupEdit = nullptr, foldCheck = nullptr, reso
 static HWND scopeEdit = nullptr, matchEdit = nullptr, labelSizeEdit = nullptr,
             labelWidthEdit = nullptr, labelHeightEdit = nullptr;
 static bool labelEditing = false, showingGroups = false;
-static HICON appIcon = nullptr;
+static NativeHandles::Icon appIcon;
 static std::vector<std::wstring> popupGroups;
 static std::vector<RECT> groupRects;
 static HIMAGELIST settingsImages = nullptr;
@@ -74,7 +74,7 @@ static int pendingClick = -1, reFoldAttempts = 0;
 static unsigned notificationCount = 0;
 static unsigned forwardingFailures = 0;
 static std::map<UINT, std::wstring> notificationGroups;
-static std::map<UINT, HICON> notificationIcons;
+static std::map<UINT, NativeHandles::Icon> notificationIcons;
 static std::wstring latestError;
 #ifdef NATIVE_TEST_BUILD
 static bool testingOwnIcons = false;
@@ -118,11 +118,10 @@ static std::wstring OwnerClass(HWND owner, DWORD pid) {
     std::wstring cls = ClassOf(owner);
     if (Lower(cls).find(L"atl:") == 0) {
         ULONG_PTR address = wcstoull(cls.c_str() + 4, nullptr, 16);
-        HANDLE process = OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid);
+        NativeHandles::Handle process(OpenProcess(PROCESS_QUERY_INFORMATION, FALSE, pid));
         if (process) {
             wchar_t file[32768];
             DWORD n = GetMappedFileNameW(process, (void *)address, file, 32768);
-            CloseHandle(process);
             if (n) {
                 std::wstring path(file, n);
                 size_t slash = path.find_last_of(L"\\/");
@@ -154,9 +153,6 @@ static uint64_t ProcessStart(HANDLE process) {
 }
 
 static void FreeItems(std::vector<TrayItem> &list) {
-    for (auto &i : list)
-        if (i.image)
-            DestroyIcon(i.image);
     list.clear();
 }
 static bool RecoveryMatches(const Hidden &record, const TrayItem &item);
@@ -228,10 +224,11 @@ static bool OwnsHidden(const TrayItem &i) {
 static bool CommandMatches(const TrayItem &item) {
     DWORD pid = 0;
     GetWindowThreadProcessId(item.toolbar, &pid);
-    HANDLE process = OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ, FALSE, pid);
+    NativeHandles::Handle process(OpenProcess(PROCESS_VM_OPERATION | PROCESS_VM_READ, FALSE, pid));
     if (!process)
         return false;
-    void *memory = VirtualAllocEx(process, nullptr, 4096, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+    NativeHandles::RemoteBuffer buffer(process, 4096);
+    void *memory = buffer.Get();
     DWORD_PTR index = 0, read = 0;
     TBBUTTON button = {};
     RemoteTrayData data = {};
@@ -245,16 +242,12 @@ static bool CommandMatches(const TrayItem &item) {
     if (ok) {
         DWORD ownerPid = 0;
         GetWindowThreadProcessId(item.owner, &ownerPid);
-        HANDLE ownerProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, ownerPid);
+        NativeHandles::Handle ownerProcess(
+            OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, ownerPid));
         uint64_t started = ownerProcess ? ProcessStart(ownerProcess) : 0;
-        if (ownerProcess)
-            CloseHandle(ownerProcess);
         RuntimeIdentity live = {ownerPid, started, item.owner, item.id};
         ok = item.runtime.Valid() && live == item.runtime;
     }
-    if (memory)
-        VirtualFreeEx(process, memory, 0, MEM_RELEASE);
-    CloseHandle(process);
     return ok;
 }
 
@@ -423,13 +416,12 @@ static void DeleteNotifications() {
         n.hWnd = mainWindow;
         n.uID = p.first;
         Shell_NotifyIconW(NIM_DELETE, &n);
-        DestroyIcon(p.second);
     }
     notificationIcons.clear();
     notificationGroups.clear();
     notificationCount = 0;
 }
-static void AddNotification(UINT id, const std::wstring &group, HICON icon) {
+static void AddNotification(UINT id, const std::wstring &group, NativeHandles::Icon icon) {
     NOTIFYICONDATAW n = {};
     n.cbSize = sizeof(n);
     n.hWnd = mainWindow;
@@ -451,12 +443,11 @@ static void AddNotification(UINT id, const std::wstring &group, HICON icon) {
         n.uVersion = NOTIFYICON_VERSION_4;
         BOOL versioned = Shell_NotifyIconW(NIM_SETVERSION, &n);
         DebugLog::Write(L"TRAY registered id=" + Number(id) + L" version4=" + Number(versioned));
-        notificationIcons[id] = icon;
+        notificationIcons[id] = std::move(icon);
         notificationGroups[id] = group;
         notificationCount++;
     } else {
         LogError(L"添加 T 图标失败，Win32=" + Number(GetLastError()));
-        DestroyIcon(icon);
     }
 }
 
@@ -535,10 +526,8 @@ static bool Dispatch(const TrayItem &item, int action, POINT pos) {
     DWORD pid = 0;
     GetWindowThreadProcessId(item.owner, &pid);
     if (item.runtime.Valid()) {
-        HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+        NativeHandles::Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
         RuntimeIdentity live = {pid, process ? ProcessStart(process) : 0, item.owner, item.id};
-        if (process)
-            CloseHandle(process);
         if (!(live == item.runtime)) {
             LogError(L"图标已重建，请刷新后重试");
             return false;
@@ -874,8 +863,6 @@ static LRESULT CALLBACK MainProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     if (msg == taskbarCreated) {
         notificationGroups.clear();
         notificationCount = 0;
-        for (auto &p : notificationIcons)
-            DestroyIcon(p.second);
         notificationIcons.clear();
         SetTimer(h, RefreshTimer, 30000, nullptr);
         RecoverIcons();
@@ -1039,8 +1026,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR cmd, int) {
     }
     if (appFont)
         DeleteObject(appFont);
-    if (appIcon)
-        DestroyIcon(appIcon);
+    appIcon = nullptr;
     ReleaseMutex(mutex);
     CloseHandle(mutex);
     return 0;

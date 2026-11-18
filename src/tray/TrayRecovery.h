@@ -6,7 +6,7 @@
 
 static bool recoveryHealthy = true;
 static unsigned lastRestoredCount = 0;
-static HANDLE recoveryGuard = nullptr;
+static NativeHandles::Handle recoveryGuard;
 static std::wstring legacyRecoveryPath;
 
 static bool RecoveryNumber(const std::wstring &text, uint64_t &value) {
@@ -219,11 +219,10 @@ static bool RuntimeAlive(const RuntimeIdentity &identity) {
     GetWindowThreadProcessId(identity.owner, &pid);
     if (pid != identity.pid)
         return false;
-    HANDLE process = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid);
+    NativeHandles::Handle process(OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, pid));
     if (!process)
         return true;
     uint64_t started = ProcessStart(process);
-    CloseHandle(process);
     return !started || started == identity.started;
 }
 static bool RecoveryMatches(const Hidden &record, const TrayItem &item) {
@@ -306,7 +305,6 @@ static bool EnsureRecoveryGuard() {
     if (recoveryGuard && WaitForSingleObject(recoveryGuard, 0) == WAIT_TIMEOUT)
         return true;
     if (recoveryGuard) {
-        CloseHandle(recoveryGuard);
         recoveryGuard = nullptr;
     }
     DWORD pid = GetCurrentProcessId();

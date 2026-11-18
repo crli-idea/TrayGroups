@@ -14,7 +14,7 @@ UINT CompletionMessage();
 UINT TimerId();
 bool IsBusy();
 void OnTimer();
-// 锁屏跳过截图，解锁后重新计算下一个整十分钟，不补拍错过的时间点。
+// 锁屏跳过截图，解锁后按所选间隔重新对齐，不补拍错过的时间点。
 void OnSessionChange(WPARAM event);
 void OnCompletion(bool success);
 // 先阻止新任务，再等待 IsBusy() 为 false，最后才可 Shutdown；不会强杀正在写图的线程。

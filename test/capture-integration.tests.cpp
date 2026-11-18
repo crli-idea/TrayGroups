@@ -88,6 +88,18 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int){
     KillTimer(mainWindow,CaptureTimer::TimerId());
     check(CaptureTimer::completionMessage==CaptureTimer::CompletionMessage(),L"worker and host use the same completion message");
     check(GetFileAttributesW((baseDir+L"\\config.json").c_str())!=INVALID_FILE_ATTRIBUTES,L"portable capture config created beside host");
+    CaptureTimer::HandleMenu(CaptureTimer::SettingsCommand);
+    check(CaptureTimer::settingsWindow&&CaptureTimer::intervalEdit,L"capture settings exposes an editable interval");
+    SetWindowTextW(CaptureTimer::intervalEdit,L"15");
+    SendMessageW(CaptureTimer::settingsWindow,WM_COMMAND,1,0);
+    check(!CaptureTimer::settingsWindow&&CaptureTimer::settings.intervalMinutes==15&&
+          ReadText(CaptureTimer::configPath).find(L"\"IntervalMinutes\":15")!=std::wstring::npos&&
+          CaptureTimer::FromTicks(CaptureTimer::nextTime).wMinute%15==0,
+          L"saving the capture interval persists it and recalculates the aligned next capture");
+    CaptureTimer::HandleMenu(CaptureTimer::SettingsCommand);
+    wchar_t intervalValue[32]={};GetWindowTextW(CaptureTimer::intervalEdit,intervalValue,32);
+    check(std::wstring(intervalValue)==L"15",L"reopened capture settings retain the chosen interval");
+    DestroyWindow(CaptureTimer::settingsWindow);
     notificationGroups[1]=L"";
     for(bool legacy:{false,true}){
         MainProc(mainWindow,TrayCallback,1,legacy?WM_LBUTTONUP:MAKELPARAM(NIN_SELECT,1));
