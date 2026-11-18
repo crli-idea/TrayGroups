@@ -59,17 +59,15 @@ static HWND mainWindow = nullptr, popupWindow = nullptr, settingsWindow = nullpt
 static HWND listWindow = nullptr, groupEdit = nullptr, foldCheck = nullptr, resourceText = nullptr;
 static HWND scopeEdit = nullptr, matchEdit = nullptr, labelSizeEdit = nullptr,
             labelWidthEdit = nullptr, labelHeightEdit = nullptr;
-static bool labelEditing = false, showingGroups = false;
+static bool labelEditing = false;
 static NativeHandles::Icon appIcon;
 static std::vector<std::wstring> popupGroups;
-static std::vector<RECT> groupRects;
 static HIMAGELIST settingsImages = nullptr;
 static bool groupEditing = false, fillingSettings = false;
 static HFONT appFont = nullptr;
 static std::wstring baseDir, configPath, recoveryPath;
 static bool refreshing = false;
 static UINT taskbarCreated;
-static std::wstring activeGroup;
 static int pendingClick = -1, reFoldAttempts = 0;
 static unsigned notificationCount = 0;
 static unsigned forwardingFailures = 0;
@@ -612,7 +610,7 @@ static std::wstring ResourceReport(bool json = false) {
     return result;
 }
 
-#include "../ui/TrayPopup.h"
+#include "../ui/CompactPopup.h"
 
 static HWND Control(HWND parent, const wchar_t *cls, const wchar_t *text, DWORD style, int x, int y,
                     int width, int height, int id) {
@@ -778,7 +776,6 @@ static LRESULT CALLBACK MainProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             if (popupWindow)
                 ClosePopup();
             else {
-                popupPage = 0;
                 ShowGroups();
             }
         }

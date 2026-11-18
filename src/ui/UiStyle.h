@@ -51,6 +51,7 @@ inline void RefreshContrast() {
 inline constexpr UINT_PTR WindowSubclass = 0x54475549, ButtonSubclass = 0x54474254;
 struct WindowState {
     int primary, title, subtitle;
+    COLORREF accent = CLR_INVALID;
     HFONT normal = nullptr, heading = nullptr;
     bool ownsNormal = false;
     ~WindowState() {
@@ -60,6 +61,20 @@ struct WindowState {
             DeleteObject(normal);
     }
 };
+inline LRESULT CALLBACK WindowProc(HWND, UINT, WPARAM, LPARAM, UINT_PTR, DWORD_PTR);
+inline COLORREF WindowAccent(HWND window) {
+    if (highContrast)
+        return Accent();
+    for (HWND current = window; current; current = GetParent(current)) {
+        DWORD_PTR value = 0;
+        if (GetWindowSubclass(current, WindowProc, WindowSubclass, &value)) {
+            auto *state = reinterpret_cast<WindowState *>(value);
+            if (state->accent != CLR_INVALID)
+                return state->accent;
+        }
+    }
+    return Accent();
+}
 inline HFONT Font(HWND window, int points, int weight) {
     return CreateFontW(-MulDiv(points, GetDpiForWindow(window), 72), 0, 0, 0, weight, FALSE, FALSE,
                        FALSE, DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Microsoft YaHei UI");
@@ -85,9 +100,10 @@ inline bool PaintButton(const DRAWITEMSTRUCT &item) {
     GetWindowSubclass(item.hwndItem, ButtonProc, ButtonSubclass, &flags);
     bool primary = flags & 1, hover = flags & 2, pressed = item.itemState & ODS_SELECTED;
     bool disabled = item.itemState & ODS_DISABLED;
-    COLORREF fill = primary ? Accent() : hover ? Canvas() : Paper();
+    COLORREF accent = WindowAccent(item.hwndItem);
+    COLORREF fill = primary ? accent : hover ? Canvas() : Paper();
     if (pressed)
-        fill = primary ? (highContrast ? Accent() : RGB(30, 78, 169)) : Tint();
+        fill = primary ? accent : Tint();
     if (disabled)
         fill = Canvas();
     Fill(item.hDC, item.rcItem, Paper());
@@ -198,12 +214,14 @@ inline void StyleChildren(HWND window) {
     if (state.primary && !wcscmp(cls, L"#32770"))
         SendMessageW(window, DM_SETDEFID, state.primary, 0);
 }
-inline void Attach(HWND window, int primary = 0, int title = -2, int subtitle = -2) {
+inline void Attach(HWND window, int primary = 0, int title = -2, int subtitle = -2,
+                   COLORREF accent = CLR_INVALID) {
     DWORD_PTR previous = 0;
     if (!window || GetWindowSubclass(window, WindowProc, WindowSubclass, &previous))
         return;
     RefreshContrast();
     auto *state = new WindowState{primary, title, subtitle};
+    state->accent = accent;
     state->normal = (HFONT)SendMessageW(window, WM_GETFONT, 0, 0);
     if (!state->normal) {
         state->normal = Font(window, 9, FW_NORMAL);

@@ -2,6 +2,7 @@
 #include "../src/config/TrayConfig.h"
 #include "../src/tray/TrayIdentity.h"
 #include "../src/tray/TrayDiagnostics.h"
+#include "../src/ui/CompactPanelLayout.h"
 #include "../src/common/TraySupport.h"
 #include <iostream>
 
@@ -164,6 +165,35 @@ int main() {
     }
     Check(copied&&moved&&GetGuiResources(GetCurrentProcess(),GR_USEROBJECTS)==iconBaseline,
           "icon copies own independent handles, moves transfer ownership and vector destruction leaks no icons");
+    TrayConfig::Settings compactDefaults;
+    Check(compactDefaults.panel.width==420&&compactDefaults.panel.accent==L"#31a18b"&&compactDefaults.panel.radius==16&&
+          compactDefaults.panel.iconSize==28&&compactDefaults.panel.columns==4&&compactDefaults.panel.labelSize==12&&
+          compactDefaults.panel.showNames&&compactDefaults.panel.showCapture,
+          "compact panel defaults match the selected HTML design");
+    compactDefaults.panel.groupOrder={L"连接服务",L"效率工具",L"影音娱乐"};
+    compactDefaults.panel.width=480;compactDefaults.panel.showCapture=false;
+    compactDefaults.Save(path);TrayConfig::Settings compactLoaded;compactLoaded.Load(path);
+    Check(compactLoaded.panel.groupOrder==compactDefaults.panel.groupOrder&&compactLoaded.panel.width==480&&!compactLoaded.panel.showCapture,
+          "panel dimensions, footer visibility and group order persist through config save and reload");
+    auto ordered=CompactPanel::Order({L"效率工具",L"影音娱乐",L"连接服务",L"其他"},{L"效率工具",L"影音娱乐",L"连接服务",L"不存在",L"效率工具"});
+    Check(ordered==std::vector<std::wstring>({L"效率工具",L"影音娱乐",L"连接服务",L"其他"}),
+          "selected group order is stable, extra groups append and sample-only names do not create groups");
+    auto compact=CompactPanel::Build({{L"效率工具",5},{L"影音娱乐",3},{L"连接服务",4}},TrayConfig::Panel{},420,96);
+    bool geometry=compact.sections.size()==3&&compact.tiles.size()==12;
+    geometry&=compact.tiles[0].top==compact.tiles[3].top&&compact.tiles[4].top>compact.tiles[3].top;
+    geometry&=compact.sections[1].heading.top>compact.tiles[4].bottom&&compact.sections[2].heading.top>compact.tiles[7].bottom;
+    for(const auto &tile:compact.tiles)geometry&=tile.left>=0&&tile.right<=420&&tile.bottom<=compact.height;
+    Check(geometry,"all groups expand at once with exactly four icon columns and nonoverlapping sections");
+    auto scaled=CompactPanel::Build({{L"效率工具",5},{L"影音娱乐",3},{L"连接服务",4}},TrayConfig::Panel{},630,144);
+    Check(scaled.tiles.size()==compact.tiles.size()&&scaled.height>compact.height&&scaled.tiles[0].left==27,
+          "compact panel geometry scales with monitor DPI");
+    Check(CompactPanel::ScrollLimit(1000,300)==700&&CompactPanel::ScrollLimit(100,300)==0,
+          "scroll limits keep the last row reachable without blank overscroll");
+    WriteText(path,L"[Panel]\nWidth=9\nRadius=900\nIconSize=900\nColumns=0\nAccent=broken\n[GroupOrder]\n1=连接服务\n2=连接服务\n3=效率工具\n");
+    compactLoaded.Load(path);
+    Check(compactLoaded.panel.width==340&&compactLoaded.panel.radius==24&&compactLoaded.panel.iconSize==44&&
+          compactLoaded.panel.columns==3&&compactLoaded.panel.accent==L"#31a18b"&&compactLoaded.panel.groupOrder.size()==2,
+          "invalid panel values are bounded and duplicate group order entries are ignored");
     DeleteFileW(path.c_str());
     return passed?0:1;
 }

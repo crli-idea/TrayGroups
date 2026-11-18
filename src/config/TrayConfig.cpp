@@ -35,6 +35,8 @@ void Settings::Load(const std::wstring &configPath) {
     foldIcons = true;
     haveSettingsPosition = false;
     debugLogging = true;
+    panel = Panel{};
+    bool ordered = false;
     std::wstring text = ReadText(configPath), section;
     size_t start = 0;
     bool hasX = false, hasY = false;
@@ -66,6 +68,38 @@ void Settings::Load(const std::wstring &configPath) {
                 iconMatch = val;
             else if (low == L"defaultgrouplabelsize")
                 defaultLabelSize = LabelSize(_wtoi(val.c_str()));
+        } else if (section == L"panel") {
+            int number = _wtoi(val.c_str());
+            if (low == L"width")
+                panel.width = std::clamp(number, 340, 600);
+            else if (low == L"radius")
+                panel.radius = std::clamp(number, 0, 24);
+            else if (low == L"iconsize")
+                panel.iconSize = std::clamp(number, 20, 44);
+            else if (low == L"columns")
+                panel.columns = std::clamp(number, 3, 6);
+            else if (low == L"labelsize")
+                panel.labelSize = std::clamp(number, 11, 18);
+            else if (low == L"spacing")
+                panel.spacing = std::clamp(number, 8, 18);
+            else if (low == L"shownames")
+                panel.showNames = val != L"0";
+            else if (low == L"showcapture")
+                panel.showCapture = val != L"0";
+            else if (low == L"accent" && val.size() == 7 && val[0] == L'#' &&
+                     std::all_of(val.begin() + 1, val.end(), [](wchar_t c) {
+                         return (c >= L'0' && c <= L'9') || (c >= L'a' && c <= L'f') ||
+                                (c >= L'A' && c <= L'F');
+                     }))
+                panel.accent = Lower(val);
+        } else if (section == L"grouporder") {
+            if (!ordered) {
+                panel.groupOrder.clear();
+                ordered = true;
+            }
+            if (!val.empty() && std::find(panel.groupOrder.begin(), panel.groupOrder.end(), val) ==
+                                    panel.groupOrder.end())
+                panel.groupOrder.push_back(val);
         } else if (section == L"programs")
             programAssignments[low] = val;
         else if (section == L"paths")
@@ -131,6 +165,16 @@ bool Settings::Save(const std::wstring &configPath) const {
         L"\n[GroupLabelHeights]\n; Minimum height in logical pixels (32..160), 0 = automatic.\n";
     for (const auto &i : groupLabelHeights)
         text += Escape(i.first) + L"=" + std::to_wstring(i.second) + L"\n";
+    text += L"\n[Panel]\n; Compact light panel, dimensions in logical pixels.\nWidth=" +
+            std::to_wstring(panel.width) + L"\nRadius=" + std::to_wstring(panel.radius) +
+            L"\nAccent=" + panel.accent + L"\nIconSize=" + std::to_wstring(panel.iconSize) +
+            L"\nColumns=" + std::to_wstring(panel.columns) + L"\nLabelSize=" +
+            std::to_wstring(panel.labelSize) + L"\nSpacing=" + std::to_wstring(panel.spacing) +
+            L"\nShowNames=" + std::to_wstring(panel.showNames) + L"\nShowCapture=" +
+            std::to_wstring(panel.showCapture) +
+            L"\n\n[GroupOrder]\n; Only existing groups are displayed, in file order.\n";
+    for (size_t n = 0; n < panel.groupOrder.size(); ++n)
+        text += std::to_wstring(n + 1) + L"=" + Escape(panel.groupOrder[n]) + L"\n";
     if (haveSettingsPosition)
         text += L"\n" + WindowSection();
     return AtomicConfig(configPath, text);

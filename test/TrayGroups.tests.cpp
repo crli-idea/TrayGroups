@@ -51,7 +51,7 @@ static int SelfTest() {
     }else pass=false;
     WNDCLASSW pc={};pc.lpfnWndProc=PopupProc;pc.hInstance=GetModuleHandleW(nullptr);pc.lpszClassName=PopupClass;pc.style=CS_DBLCLKS;RegisterClassW(&pc);
     for(size_t n=0;n<items.size();n++)for(int action=0;action<3;action++){
-        popupItems={(int)n};testEvents.clear();POINT point;GetCursorPos(&point);auto expected=CallbackSequence(items[n].id,items[n].version,action,point);
+        popupItems={(int)n};popupIcons={items[n]};popupLayout.tiles={{12,6,108,74}};popupViewport={0,34,420,120};popupScroll=0;testEvents.clear();POINT point;GetCursorPos(&point);auto expected=CallbackSequence(items[n].id,items[n].version,action,point);
         popupWindow=CreateWindowW(PopupClass,L"",WS_POPUP,0,0,420,120,nullptr,nullptr,pc.hInstance,nullptr);
         SendMessageW(popupWindow,action==0?WM_LBUTTONUP:action==1?WM_LBUTTONDBLCLK:WM_RBUTTONUP,0,MAKELPARAM(40,60));
         bool received=PumpUntil(expected.size());
@@ -244,7 +244,7 @@ static bool HiddenPopupRegression(std::wstring& report) {
         // Exercise the actual T handler, not just the popup construction function.
         MainProc(mainWindow,WM_APP+8,1,1);
         bool onlyHidden=popupItems.size()==1&&items[popupItems[0]].owner==mainWindow&&items[popupItems[0]].id==701;
-        check(onlyHidden&&popupGroups==std::vector<std::wstring>{L"\u9690\u85cf"}&&activeGroup==L"\u9690\u85cf",L"T immediately shows only hidden grouped icon and no ungrouped entry");
+        check(onlyHidden&&popupGroups==std::vector<std::wstring>{L"\u9690\u85cf"},L"T immediately shows only hidden grouped icon and no ungrouped entry");
         if(popupWindow&&onlyHidden){
             RedrawWindow(popupWindow,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN);
             if(action==0)SaveTestWindow(popupWindow,baseDir+L"\\hidden-popup-visible.bmp");
@@ -268,7 +268,7 @@ static bool HiddenPopupRegression(std::wstring& report) {
     }
     bool stable=popupWindow!=nullptr;
     for(int repeat=0;repeat<8&&popupWindow;repeat++){
-        RECT label=groupRects[0];
+        RECT label=popupLayout.sections[0].heading;OffsetRect(&label,0,popupViewport.top);
         SendMessageW(popupWindow,WM_LBUTTONUP,0,MAKELPARAM(label.left+10,label.top+10));
         // Consume the posted rebuild without depending on the desktop cursor.
         MSG message;
@@ -287,7 +287,7 @@ static bool HiddenPopupRegression(std::wstring& report) {
     check(!VisibleAtRuntime(identity.runtime),L"post-click timer folds a program icon revealed by its own update");
     RestoreHidden();settingsConfig.foldIcons=false;Refresh();
     ShowGroups();check(popupItems.empty(),L"paused folding does not duplicate visible Windows icons in T");
-    ClosePopup();ShowGroup(L"");check(showingGroups&&popupItems.empty()&&std::find(popupGroups.begin(),popupGroups.end(),L"")==popupGroups.end(),L"empty-group requests never expose Windows-owned ungrouped icons");
+    ClosePopup();ShowGroups();check(popupItems.empty()&&std::find(popupGroups.begin(),popupGroups.end(),L"")==popupGroups.end(),L"empty-group requests never expose Windows-owned ungrouped icons");
     ClosePopup();RestoreHidden();
     check(VisibleAtRuntime(identity.runtime)&&hidden.empty()&&GetFileAttributesW(recoveryPath.c_str())==INVALID_FILE_ATTRIBUTES,L"all hidden test icons restored and recovery journal removed");
     KillTimer(mainWindow,ReFoldTimer);reFoldAttempts=0;
@@ -358,6 +358,7 @@ static bool GuidRegression(std::wstring& report) {
 }
 
 #include "TrayInspector.tests.h"
+#include "CompactPopup.tests.h"
 
 static int UiSelfTest() {
     INITCOMMONCONTROLSEX common={sizeof(common),ICC_LISTVIEW_CLASSES|ICC_TAB_CLASSES};InitCommonControlsEx(&common);
@@ -460,37 +461,7 @@ static int UiSelfTest() {
     SyncNotifications();testingOwnIcons=true;auto tray=ReadTray();int count=0;for(const auto& i:tray)if(i.owner==mainWindow)count++;
     check(notificationIcons.size()==1&&notificationIcons.count(1)&&count==1,L"exactly one T tray entry; no numbered group icon");
     FreeItems(tray);testingOwnIcons=false;
-    popupPage=0;ShowGroups();
-    check(std::find(popupGroups.begin(),popupGroups.end(),L"")==popupGroups.end()&&!activeGroup.empty(),L"T popup omits ungrouped and chooses a named group");
-    TrayItem visibleRow;visibleRow.group=L"Named";
-    TrayItem hiddenRow=visibleRow;hiddenRow.state=TBSTATE_HIDDEN;hiddenRow.addressKnown=true;
-    TrayItem ungroupedRow=hiddenRow;ungroupedRow.group.clear();
-    TrayItem pendingRow=hiddenRow;pendingRow.pending=true;
-    check(!PopupEligible(visibleRow)&&PopupEligible(hiddenRow)&&!PopupEligible(ungroupedRow)&&!PopupEligible(pendingRow),L"popup includes only hidden named-group icons, excluding visible, ungrouped and uncertain icons");
-    check(popupWindow&&showingGroups&&std::find(popupGroups.begin(),popupGroups.end(),L"路径分组")!=popupGroups.end(),L"T popup contains all configured groups");
-    size_t index=std::find(popupGroups.begin(),popupGroups.end(),L"测试分组")-popupGroups.begin();
-    if(index<groupRects.size()){
-        int dpi=GetDpiForWindow(popupWindow),height=groupRects[index].bottom-groupRects[index].top,width=groupRects[index].right-groupRects[index].left;
-        report+=L"Label geometry: dpi="+Number(dpi)+L" width="+Number(width)+L" height="+Number(height)+L"\n";
-        check(height>=std::max(MulDiv(24,dpi,72)+24,MulDiv(90,dpi,96))&&width==MulDiv(320,dpi,96),L"group label dimensions follow that group's configured font size");
-    }
-    UpdateWindow(popupWindow);SaveTestWindow(popupWindow,baseDir+L"\\groups-preview.bmp");
-    size_t target=std::find(popupGroups.begin(),popupGroups.end(),L"路径分组")-popupGroups.begin();
-    if(target<groupRects.size()){
-        RECT r=groupRects[target];SendMessageW(popupWindow,WM_LBUTTONUP,0,MAKELPARAM(r.left+10,r.top+10));MSG m;while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}
-        check(popupWindow&&showingGroups&&activeGroup==L"路径分组"&&popupItemTop>groupRects.back().bottom,L"group list remains above the selected group's icon view");
-    }
-    TrayItem extra;extra.process=L"sample.exe";extra.group=activeGroup;extra.owner=mainWindow;extra.state=TBSTATE_HIDDEN;extra.addressKnown=true;
-    for(int i=0;i<20;i++){extra.id=i+100;items.push_back(extra);}
-    popupItemPage=0;FillPopupItems(activeGroup);
-    check(popupItemPages>1&&popupItems.size()==(size_t)popupItemPageSize,L"overflowing group icons have a first page");
-    if(popupItemPages>1){
-        int footer=popupItemTop+std::max(1,((int)popupItems.size()+3)/4)*72;
-        check(footer>popupItemTop&&popupItemPages>=2,L"remaining program icons have a distinct page");
-        popupItemPage=1;FillPopupItems(activeGroup);
-        check(popupItemPage==1&&!popupItems.empty(),L"next page exposes remaining program icons");
-    }
-    if(popupWindow){SendMessageW(popupWindow,WM_LBUTTONUP,0,MAKELPARAM(30,15));MSG m;while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}check(popupWindow&&showingGroups,L"group list remains visible when its header is clicked");}
+    if(!CompactPopupRegression(report))ok=false;
     ClosePopup();DeleteNotifications();DestroyWindow(mainWindow);mainWindow=nullptr;
     auto memory=NativeResources::Read();report+=L"PrivateWorkingSetBytes="+Number(memory.privateWorking)+L"\n";
     WriteText(baseDir+L"\\ui-self-test.txt",report);

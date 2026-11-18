@@ -1,5 +1,7 @@
 # 测试目录
 
+`CompactPopup.tests.h` 验证紧凑面板多组同时展开、四列、青绿色方案、图标快照隔离、重绘句柄稳定、固定截图区、滚动/键盘到达最后图标、滚动命中和 Esc；自测图在 `build/compact-panel-preview.bmp`。`core-modules.ps1` 验证配置默认值和往返、分组顺序、纯布局缩放及滚动范围。`ui-preview/` 是独立离线 HTML 设计预览，不参与原生程序运行。
+
 `guid-research/` 的 [托盘 GUID 回归测试](guid-research/README.md) 直接链接正式 `TrayGuid.cpp`，验证内部 COM 快照、普通/GUID 图标识别与隐藏恢复；自测入口不参与正式构建。
 
 测试源码、测试程序、临时配置、测试图片、报告及编译产物仅存放在此目录。测试配置与正式配置隔离。

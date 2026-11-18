@@ -1,13 +1,23 @@
 #pragma once
 #include <map>
 #include <string>
+#include <vector>
 
 // 只管理 groups.ini 的可持久化设置；运行时绑定和恢复日志不属于配置。
 namespace TrayConfig {
 int LabelSize(int value);
 bool ValidMatch(const std::wstring &value);
 
+// 紧凑面板参数采用 96 DPI 逻辑像素，渲染时统一缩放。
+struct Panel {
+    int width = 420, radius = 16, iconSize = 28, columns = 4, labelSize = 12, spacing = 12;
+    bool showNames = true, showCapture = true;
+    std::wstring accent = L"#31a18b";
+    std::vector<std::wstring> groupOrder = {L"效率工具", L"影音娱乐", L"连接服务"};
+};
+
 struct Settings {
+    Panel panel;
     std::wstring iconMatch = L"path-guid";
     int defaultLabelSize = 12, settingsX = 0, settingsY = 0;
     bool haveSettingsPosition = false, foldIcons = true, debugLogging = true;
