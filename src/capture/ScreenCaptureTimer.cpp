@@ -799,7 +799,23 @@ static void ToggleStartup() {
         RegCloseKey(key);
     }
 }
+#ifdef NATIVE_TEST_BUILD
+static void (*testOpenFolder)(const std::wstring &) = nullptr;
+#endif
 static void OpenFolder() {
+    // 首次截图前默认目录可能尚未创建，先确保目标存在，避免 Explorer 打开其他位置。
+    if (!MakeDirectories(settings.directory)) {
+        Log(L"ERROR cannot open capture directory win32=" + std::to_wstring(GetLastError()));
+        MessageBoxW(mainWindow, L"截图目录无法创建，请检查保存位置和目录权限。", L"打开保存目录",
+                    MB_ICONERROR);
+        return;
+    }
+#ifdef NATIVE_TEST_BUILD
+    if (testOpenFolder) {
+        testOpenFolder(settings.directory);
+        return;
+    }
+#endif
     std::wstring command = L"explorer.exe \"" + settings.directory + L"\"";
     STARTUPINFOW si = {};
     si.cb = sizeof(si);

@@ -7,6 +7,7 @@ foreach ($script in @(
     (Join-Path $PSScriptRoot 'recovery-lifecycle.ps1'),
     (Join-Path $PSScriptRoot 'capture-integration.ps1'),
     (Join-Path $PSScriptRoot 'run.ps1'),
+    (Join-Path $PSScriptRoot 'settings-shell.ps1'),
     (Join-Path $PSScriptRoot 'capture\run.ps1')
 )) {
     try {

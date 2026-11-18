@@ -28,3 +28,8 @@
 系统控件回归覆盖五个 PropertySheet 页面、应用/确定/取消、截图页保存与取消、窗口位置、真实测试托盘图标的左键/双击/右键、四列分组布局、100 图标滚动及固定底栏。UI 报告使用任务管理器专用工作集口径，设置和面板均检查小于 7 MiB；输出在 `test/build/ui-self-test-*.txt`。原型/测试图示中的“示例”图标为合成数据，不代表已安装应用。
 
 本地可设置 `$env:TRAYGROUPS_TEST_REAL_CAPTURE='1'` 后运行 `run.ps1`，额外在设置窗口打开时截取真实桌面，检查 PNG 的尺寸等于整个物理虚拟桌面，并检查采样峰值小于 7 MiB。图片只保存在忽略的 `test/build/native-ui-capture/Captures/`，不会打包或上传；CI 默认不启用真实桌面截图。
+
+
+`SettingsButtons.tests.h` 逐项枚举五个设置页和标准按钮栏中的可见按钮/复选框，使用 `BM_CLICK` 检查点击后的实际状态（当前 13/13），并覆盖 T 面板三个按钮。检查详情、规则管理的重新绑定/删除/刷新/确定/取消/X、资源窗口 X，以及五个设置页面的标题栏 `SC_CLOSE`、消息预处理关闭、Alt+F4、未应用草稿丢弃和句柄释放。截图按钮使用测试编码器，打开目录按钮检查首次创建目录及 Explorer 请求；不点击其他程序的托盘图标，不弹出 Explorer 窗口。真实 PNG 编码由独立截图测试及可选真实桌面测试检查。
+
+`settings-shell.ps1` 在正常退出常驻程序后，复制正式 Release EXE 到 `build/settings-shell/portable/`，通过真实主消息循环依次打开五个页面、发送标题栏系统关闭命令，检查窗口销毁且托盘进程仍存活，再通过第二次启动重新打开。此测试不定义 `NATIVE_TEST_BUILD`，结果在 `build/settings-shell/report.txt`；已加入 `run-all.ps1`。

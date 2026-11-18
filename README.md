@@ -1,5 +1,7 @@
 # TrayGroups 托盘分组器（C++ 原生版）
 
+1.5.1 修复设置窗口标题栏 X 和 Alt+F4 的关闭处理，关闭后丢弃未应用修改并释放窗口资源，托盘程序继续运行；“恢复全部图标”同时同步设置页的折叠开关。首次点击“打开保存目录”会先创建目标目录。设置页全部 13 个可见按钮/复选框、T 面板的 3 个按钮、详情/规则管理子窗口和五个页面的关闭入口均纳入本地交互回归。
+
 托盘只显示一个 T。左键打开系统 ListView 分组图标面板：各组按顺序展开，只显示已经隐藏的分组图标；未分组图标继续由 Windows 管理。支持原程序左键、双击、右键操作，以及系统滚动条、方向键、Home/End、Page Up/Down。Enter 执行所选图标的左键操作，菜单键或 Shift+F10 执行右键操作，Esc 关闭。
 
 1.5.0 使用 Win32 系统控件重新实现界面。分组面板由 ListView 和 ImageList 负责排列、选中效果、滚动和提示；字体、组标题、按钮、边框和颜色遵循 Windows 系统主题。默认宽度 420 逻辑像素、图标 28 逻辑像素、每行 4 个、显示名称和底部截图区。保留原有图标身份、分组、隐藏恢复及截图调度，不嵌入浏览器。
@@ -164,15 +166,15 @@ Top=100
 
 运行 `build.ps1` 构建 TrayGroups 单一程序。截图源码在 `src/capture/`，截图测试在 `test/capture/`，所有新编译产物写入 `test/build/`。运行 `test/run-all.ps1` 执行全部测试。
 
-运行 `.\package.ps1 -Version v1.5.0` 生成 `.\TrayGroups-v1.5.0-windows-x64.zip`。便携包包含 `TrayGroups.exe`、干净的默认 `groups.ini` 和 README；模板位于 `defaults/groups.ini`，不包含个人分组或恢复记录。`config.json` 首次启动时生成。升级时保留自己已有的配置和恢复文件。打包脚本检查文件是否齐全，并校验版本标签与 EXE 版本一致。
+运行 `.\package.ps1 -Version v1.5.1` 生成 `.\TrayGroups-v1.5.1-windows-x64.zip`。便携包包含 `TrayGroups.exe`、干净的默认 `groups.ini` 和 README；模板位于 `defaults/groups.ini`，不包含个人分组或恢复记录。`config.json` 首次启动时生成。升级时保留自己已有的配置和恢复文件。打包脚本检查文件是否齐全，并校验版本标签与 EXE 版本一致。
 
 每次推送到 `main` 都会通过 GitHub Actions 自动构建、测试并打包，在对应运行页面的 Artifacts 中提供 Windows 便携包；也支持在 Actions 页面手动运行。推送 `v*` 标签时会额外自动创建 Release 并上传便携包。Release 需要仓库允许 Actions 的 `GITHUB_TOKEN` 写入内容。
 
-发布约定：每次完成 bug 修复或新增功能，都必须递增版本号、验证后提交，并为该提交创建及推送 `v版本号` 标签，触发自动构建和 Release。bug 修复递增补丁版本（例如 `v1.1.2`），新增功能递增次版本（例如 `v1.5.0`）；修改 `src/app/AppVersion.h` 中的数字与文本版本即可同步 EXE 资源、启动日志和托盘提示。标签发布后不覆盖或复用，后续修复使用新版本。仅推送 `main` 不算完成上述发布流程。
+发布约定：每次完成 bug 修复或新增功能，都必须递增版本号、验证后提交，并为该提交创建及推送 `v版本号` 标签，触发自动构建和 Release。bug 修复递增补丁版本（例如 `v1.1.2`），新增功能递增次版本（例如 `v1.5.1`）；修改 `src/app/AppVersion.h` 中的数字与文本版本即可同步 EXE 资源、启动日志和托盘提示。标签发布后不覆盖或复用，后续修复使用新版本。仅推送 `main` 不算完成上述发布流程。
 
 每次版本发布前，必须在本地 Windows 上以发布模式运行 `.\build.ps1`，再运行 `.\package.ps1 -Version v版本号`，生成 `.\TrayGroups-v版本号-windows-x64.zip`，方便本地自测，直接在项目根目录查找。ZIP 必须包含对应版本的 `TrayGroups.exe`、默认 `groups.ini` 和 README；生成后校验包内容与 EXE 版本，并在发布说明中给出本地 ZIP 路径。更新版本号或包内文件后，重新生成本地 ZIP。
 
-例如本次版本：提交后执行 `git tag -a v1.5.0 -m "TrayGroups v1.5.0"`，再执行 `git push origin main v1.5.0`，最后确认 Actions 成功且 Release 的便携包可下载。
+例如本次版本：提交后执行 `git tag -a v1.5.1 -m "TrayGroups v1.5.1"`，再执行 `git push origin main v1.5.1`，最后确认 Actions 成功且 Release 的便携包可下载。
 
 ## 本地调试日志
 

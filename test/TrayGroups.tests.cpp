@@ -4,7 +4,15 @@
 static const UINT ActCallback=WM_APP+2;
 // Isolated regression harness: two icons owned by this process, no clicks on user apps.
 static std::vector<std::pair<WPARAM,LPARAM>> testEvents;
-static LRESULT CALLBACK TestProc(HWND h,UINT msg,WPARAM w,LPARAM l) { if(msg==ActCallback){testEvents.push_back({w,l});return 0;}return DefWindowProcW(h,msg,w,l); }
+static bool buttonHostMessages = false;
+static LRESULT CALLBACK TestProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
+    if(msg==ActCallback){testEvents.push_back({w,l});return 0;}
+    if(buttonHostMessages&&msg==RestoreAllApp)return MainProc(h,msg,w,l);
+    if(buttonHostMessages&&msg==WM_COMMAND&&(LOWORD(w)==CaptureTimer::CaptureNowCommand||
+       LOWORD(w)==CaptureTimer::SettingsCommand||LOWORD(w)==IDC_RESTORE_ALL))return MainProc(h,msg,w,l);
+    if(buttonHostMessages&&msg==CaptureTimer::CompletionMessage()){CaptureTimer::OnCompletion(w!=0);return 0;}
+    return DefWindowProcW(h,msg,w,l);
+}
 static bool PumpUntil(size_t count) { DWORD start=GetTickCount();MSG m;do{while(PeekMessageW(&m,nullptr,0,0,PM_REMOVE)){TranslateMessage(&m);DispatchMessageW(&m);}if(testEvents.size()>=count)return true;Sleep(1);}while(GetTickCount()-start<1000);return false; }
 static int SelfTest() {
     std::wstring failures;
@@ -372,12 +380,14 @@ static bool GuidRegression(std::wstring& report) {
 
 #include "TrayInspector.tests.h"
 #include "NativeTrayPanel.tests.h"
+#include "SettingsButtons.tests.h"
 
 static int UiSelfTest() {
     INITCOMMONCONTROLSEX common={sizeof(common),ICC_LISTVIEW_CLASSES|ICC_TAB_CLASSES};InitCommonControlsEx(&common);
     NONCLIENTMETRICSW metrics={};metrics.cbSize=sizeof(metrics);SystemParametersInfoW(SPI_GETNONCLIENTMETRICS,sizeof(metrics),&metrics,0);appFont=CreateFontIndirectW(&metrics.lfMessageFont);appIcon=MakeAppIcon();
     WNDCLASSW c={};c.hInstance=GetModuleHandleW(nullptr);c.hCursor=LoadCursorW(nullptr,IDC_ARROW);c.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);c.hIcon=appIcon;c.lpfnWndProc=PopupProc;c.lpszClassName=PopupClass;c.style=CS_DBLCLKS;RegisterClassW(&c);
     c.lpfnWndProc=TestProc;c.lpszClassName=L"Crli.TrayGroups.UiReceiver";RegisterClassW(&c);mainWindow=CreateWindowW(c.lpszClassName,L"",0,0,0,0,0,nullptr,nullptr,c.hInstance,nullptr);
+    c.lpfnWndProc=ResourceProc;c.lpszClassName=L"Crli.TrayGroups.Resources";RegisterClassW(&c);
     CaptureTimer::MakeDirectories(baseDir+L"\\native-ui-capture");
     CaptureTimer::Initialize(mainWindow,GetModuleHandleW(nullptr),baseDir+L"\\native-ui-capture");
     KillTimer(mainWindow,CaptureTimer::TimerId());
@@ -455,14 +465,14 @@ static int UiSelfTest() {
     check(pageBounds.top>tabBounds.top+MulDiv(15,GetDpiForWindow(settingsWindow),96),L"tab labels remain above the page content");
     SetFocus(GetDlgItem(settingsWindow,IDC_APPLY));
     MSG key={};key.hwnd=GetFocus();key.message=WM_KEYDOWN;key.wParam=VK_TAB;
-    PropSheet_IsDialogMessage(settingsWindow,&key);
+    ProcessSettingsMessage(key);
     check(GetFocus()&&GetFocus()!=GetDlgItem(settingsWindow,IDC_APPLY)&&IsChild(settingsWindow,GetFocus()),L"Tab key navigates system property sheet controls");
     auto openMemory=NativeResources::Read();report+=L"SettingsOpenPrivateWorkingSetBytes="+Number(openMemory.privateWorking)+L"\n";
     check(openMemory.privateWorking<7*1048576,L"open settings private working set is below 7 MiB");
     bool previousFold=settingsConfig.foldIcons;settingsConfig.foldIcons=false;SendMessageW(foldCheck,BM_SETCHECK,BST_UNCHECKED,0);
     SettingsChanged();SendMessageW(settingsWindow,WM_NEXTDLGCTL,(WPARAM)GetDlgItem(settingsWindow,IDC_APPLY),TRUE);
     MSG applyKey={};applyKey.hwnd=GetFocus();applyKey.message=WM_KEYDOWN;applyKey.wParam=VK_RETURN;
-    check(PropSheet_IsDialogMessage(settingsWindow,&applyKey)!=FALSE,L"system Apply button retains native Enter-key behavior");
+    check(ProcessSettingsMessage(applyKey)!=FALSE,L"system Apply button retains native Enter-key behavior");
     check(settingsWindow&&ReadText(configPath).find(L"FoldOriginalIcons=0")!=std::wstring::npos&&!IsWindowEnabled(GetDlgItem(settingsWindow,IDC_APPLY)),L"Apply persists settings and refreshes the native dialog");
     settingsConfig.foldIcons=previousFold;
     SetDlgItemInt(settingsPages[1],IDC_PANEL_WIDTH,480,FALSE);
@@ -497,16 +507,23 @@ static int UiSelfTest() {
         SetThreadDpiAwarenessContext(captureContext);
     }
     SetFocus(GetDlgItem(settingsWindow,IDC_CLOSE));key.hwnd=GetFocus();key.wParam=VK_ESCAPE;
-    PropSheet_IsDialogMessage(settingsWindow,&key);
+    ProcessSettingsMessage(key);
     check(!settingsWindow,L"Escape closes the modeless settings dialog");
     check(CaptureTimer::GetPreferences().intervalMinutes==changedInterval,L"Cancel discards unapplied capture interval changes");
+    for(int closePage=0;closePage<5;++closePage) {
+        ShowSettings(closePage);HWND closing=settingsWindow;
+        SendMessageW(closing,WM_SYSCOMMAND,SC_CLOSE,0);
+        check(!settingsWindow&&!IsWindow(closing),(L"title-bar X / SC_CLOSE destroys settings page "+Number(closePage)).c_str());
+        if(settingsWindow)SendMessageW(settingsWindow,WM_CLOSE,0,0);
+    }
     ShowSettings();SendMessageW(settingsWindow,WM_COMMAND,IDOK,0);
     check(!settingsWindow,L"standard OK applies and destroys the modeless property sheet");
     if(settingsWindow)SendMessageW(settingsWindow,WM_CLOSE,0,0);
     // Real Explorer icons owned only by the test: exactly one T despite many groups.
-    SyncNotifications();testingOwnIcons=true;auto tray=ReadTray();int count=0;for(const auto& i:tray)if(i.owner==mainWindow)count++;
+    SyncNotifications();testingOwnIcons=true;WaitForButtonIcon(1);auto tray=ReadTray();int count=0;for(const auto& i:tray)if(i.owner==mainWindow)count++;
     check(notificationIcons.size()==1&&notificationIcons.count(1)&&count==1,L"exactly one T tray entry; no numbered group icon");
     FreeItems(tray);testingOwnIcons=false;
+    if(!SettingsButtonsRegression(report))ok=false;
     if(!NativePanelRegression(report))ok=false;
     ClosePopup();DeleteNotifications();CaptureTimer::Shutdown();DestroyWindow(mainWindow);mainWindow=nullptr;
     auto memory=NativeResources::Read();report+=L"PrivateWorkingSetBytes="+Number(memory.privateWorking)+L"\n";

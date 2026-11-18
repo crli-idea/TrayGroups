@@ -670,6 +670,7 @@ static void RestoreAllOwnedIcons() {
         LogError(L"折叠已暂停，但暂停设置未能保存");
     ContinueRestoring();
     if (settingsWindow) {
+        settingsDraft.foldIcons = false;
         SendMessageW(foldCheck, BM_SETCHECK, BST_UNCHECKED, 0);
         FillSettings();
     }
@@ -1013,7 +1014,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR cmd, int) {
         ShowSettings();
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
-        if (settingsWindow && PropSheet_IsDialogMessage(settingsWindow, &msg))
+        if (ProcessSettingsMessage(msg))
             continue;
         TranslateMessage(&msg);
         DispatchMessageW(&msg);

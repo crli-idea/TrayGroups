@@ -357,7 +357,7 @@ static INT_PTR SettingsCommands(HWND h, UINT msg, WPARAM w, LPARAM l) {
                     SetWindowTextW(groupEdit, settingsItems[row].group.c_str());
             }
         }
-        return TRUE;
+        return n->hwndFrom == listWindow;
     }
     return FALSE;
 }
@@ -396,7 +396,8 @@ static INT_PTR CALLBACK SettingsPageProc(HWND page, UINT message, WPARAM w, LPAR
 static LRESULT CALLBACK SettingsSheetProc(HWND window, UINT message, WPARAM w, LPARAM l,
                                           UINT_PTR id, DWORD_PTR) {
     // 这些页面没有取消确认；关闭与取消均丢弃草稿并立即释放无模式窗口。
-    if (message == WM_CLOSE || (message == WM_COMMAND && LOWORD(w) == IDCANCEL)) {
+    if (message == WM_CLOSE || (message == WM_SYSCOMMAND && (w & 0xfff0) == SC_CLOSE) ||
+        (message == WM_COMMAND && LOWORD(w) == IDCANCEL)) {
         DestroyWindow(window);
         return 0;
     }
@@ -435,6 +436,16 @@ static LRESULT CALLBACK SettingsSheetProc(HWND window, UINT message, WPARAM w, L
         !PropSheet_GetCurrentPageHwnd(window))
         DestroyWindow(window);
     return result;
+}
+// 无模式属性页也可能在预处理键盘/系统消息时结束；所有消息入口共用销毁检查。
+static bool ProcessSettingsMessage(MSG &message) {
+    HWND window = settingsWindow;
+    if (!window)
+        return false;
+    bool handled = PropSheet_IsDialogMessage(window, &message) != FALSE;
+    if (IsWindow(window) && !PropSheet_GetCurrentPageHwnd(window))
+        DestroyWindow(window);
+    return handled;
 }
 static int CALLBACK SettingsSheetCallback(HWND window, UINT message, LPARAM) {
     if (message == PSCB_INITIALIZED) {
