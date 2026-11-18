@@ -3,6 +3,7 @@
 #pragma once
 #include "TraySettingsIds.h"
 #include "TrayInspector.h"
+#include "UiStyle.h"
 #include <uxtheme.h>
 
 static TrayConfig::Settings settingsDraft;
@@ -69,7 +70,7 @@ static void FillSettings() {
         ListView_SetImageList(listWindow, nullptr, LVSIL_SMALL);
         ImageList_Destroy(settingsImages);
     }
-    int iconSize = MulDiv(16, GetDpiForWindow(settingsWindow), 96);
+    int iconSize = MulDiv(20, GetDpiForWindow(settingsWindow), 96);
     settingsImages = ImageList_Create(iconSize, iconSize, ILC_COLOR32 | ILC_MASK,
                                       (int)settingsItems.size() + 1, 4);
     ListView_SetImageList(listWindow, settingsImages, LVSIL_SMALL);
@@ -284,6 +285,7 @@ static INT_PTR CALLBACK SettingsPageProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         return SendMessageW(GetParent(h), msg, w, l);
     if (msg == WM_INITDIALOG) {
         EnableThemeDialogTexture(h, ETDT_ENABLETAB);
+        UiStyle::Attach(h, 0, -2, IDC_UI_SUBTITLE);
         return TRUE;
     }
     return FALSE;
@@ -436,6 +438,7 @@ static void ShowSettings() {
         LogError(L"设置窗口创建失败：" + Number(GetLastError()));
         return;
     }
+    UiStyle::Attach(settingsWindow, IDC_APPLY, IDC_UI_TITLE, IDC_UI_SUBTITLE);
     settingsTabs = GetDlgItem(settingsWindow, IDC_SETTINGS_TABS);
     const wchar_t *names[] = {L"分组", L"外观", L"高级"};
     const int pages[] = {IDD_GROUPS, IDD_APPEARANCE, IDD_ADVANCED};
@@ -484,6 +487,9 @@ static void ShowSettings() {
     int columnOrder[] = {0, 1, 2, 5, 3, 4};
     ListView_SetColumnOrderArray(listWindow, 6, columnOrder);
     SetWindowTheme(listWindow, L"Explorer", nullptr);
+    UiStyle::StyleChildren(group);
+    UiStyle::StyleChildren(appearance);
+    UiStyle::StyleChildren(advanced);
     for (HWND combo : {groupEdit, appearanceGroup})
         SendMessageW(combo, CB_LIMITTEXT, 100, 0);
     for (auto text : {L"仅选中的图标（默认）", L"此完整路径的全部图标", L"此程序名的全部图标"})

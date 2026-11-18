@@ -4,6 +4,7 @@
 #define _WIN32_WINNT 0x0A00
 #include "TrayInspector.h"
 #include "TraySettingsIds.h"
+#include "UiStyle.h"
 #include "../common/TraySupport.h"
 #include <commctrl.h>
 #include <algorithm>
@@ -12,9 +13,13 @@ namespace TrayInspector {
 namespace {
 INT_PTR CALLBACK DetailsProc(HWND window, UINT message, WPARAM w, LPARAM l) {
     if (message == WM_INITDIALOG) {
+        UiStyle::Attach(window, IDOK, IDC_UI_TITLE, IDC_UI_SUBTITLE);
         SetDlgItemTextW(window, IDC_DETAIL_TEXT, reinterpret_cast<const wchar_t *>(l));
         SendDlgItemMessageW(window, IDC_DETAIL_TEXT, EM_SETSEL, 0, 0);
-        return TRUE;
+        SendDlgItemMessageW(window, IDC_DETAIL_TEXT, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
+                            MAKELPARAM(UiStyle::Scale(window, 10), UiStyle::Scale(window, 10)));
+        SetFocus(GetDlgItem(window, IDOK));
+        return FALSE;
     }
     if (message == WM_CLOSE ||
         (message == WM_COMMAND && (LOWORD(w) == IDOK || LOWORD(w) == IDCANCEL))) {
@@ -70,6 +75,7 @@ void RefreshIcons(HWND window, RuleEditor &editor) {
 INT_PTR CALLBACK RulesProc(HWND window, UINT message, WPARAM w, LPARAM l) {
     auto *editor = reinterpret_cast<RuleEditor *>(GetWindowLongPtrW(window, DWLP_USER));
     if (message == WM_INITDIALOG) {
+        UiStyle::Attach(window, IDC_RULE_REBIND, IDC_UI_TITLE, IDC_UI_SUBTITLE);
         editor = reinterpret_cast<RuleEditor *>(l);
         SetWindowLongPtrW(window, DWLP_USER, l);
         HWND list = GetDlgItem(window, IDC_RULE_LIST);

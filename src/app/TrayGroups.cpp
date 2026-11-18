@@ -977,7 +977,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR cmd, int) {
         UINT style;
     };
     Registration classes[] = {{AppClass, MainProc, 0},
-                              {PopupClass, PopupProc, CS_DBLCLKS},
+                              {PopupClass, PopupProc, CS_DBLCLKS | CS_DROPSHADOW},
                               {L"Crli.TrayGroups.Resources", ResourceProc, 0}};
     for (auto c : classes) {
         WNDCLASSW wc = {};

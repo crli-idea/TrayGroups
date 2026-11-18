@@ -446,7 +446,9 @@ static int UiSelfTest() {
     auto openMemory=NativeResources::Read();report+=L"SettingsOpenPrivateWorkingSetBytes="+Number(openMemory.privateWorking)+L"\n";
     check(openMemory.privateWorking<3*1048576,L"open settings private working set is below 3 MiB");
     bool previousFold=settingsConfig.foldIcons;settingsConfig.foldIcons=false;SendMessageW(foldCheck,BM_SETCHECK,BST_UNCHECKED,0);
-    SendMessageW(settingsWindow,WM_COMMAND,IDC_APPLY,0);
+    SetFocus(GetDlgItem(settingsWindow,IDC_APPLY));
+    MSG applyKey={};applyKey.hwnd=GetFocus();applyKey.message=WM_KEYDOWN;applyKey.wParam=VK_RETURN;
+    check(IsDialogMessageW(settingsWindow,&applyKey)!=FALSE,L"styled default Apply button retains native Enter-key behavior");
     check(ReadText(configPath).find(L"FoldOriginalIcons=0")!=std::wstring::npos&&ControlText(settingsWindow).find(L"\u5df2\u5e94\u7528")!=std::wstring::npos,L"Apply persists settings and refreshes the native dialog");
     settingsConfig.foldIcons=previousFold;
     UpdateWindow(settingsWindow);SaveTestWindow(settingsWindow,baseDir+L"\\settings-preview.bmp");

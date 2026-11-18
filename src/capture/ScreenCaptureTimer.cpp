@@ -19,6 +19,8 @@
 #include "CaptureTimer.h"
 #include "../common/NativeResources.h"
 #include "../common/NativeHandles.h"
+#include "../ui/UiStyle.h"
+#include "../ui/TraySettingsIds.h"
 
 namespace CaptureTimer {
 
@@ -621,6 +623,10 @@ static std::wstring ResourceText(bool json = false) {
 }
 static HWND CaptureControl(HWND h, const wchar_t *cls, const wchar_t *text, DWORD style, int x,
                            int y, int width, int height, int id) {
+    x = UiStyle::Scale(h, x);
+    y = UiStyle::Scale(h, y);
+    width = UiStyle::Scale(h, width);
+    height = UiStyle::Scale(h, height);
     HWND c = CreateWindowExW(0, cls, text, WS_CHILD | WS_VISIBLE | WS_TABSTOP | style, x, y, width,
                              height, h, (HMENU)(INT_PTR)id, GetModuleHandleW(nullptr), nullptr);
     SendMessageW(c, WM_SETFONT, (WPARAM)font, TRUE);
@@ -651,9 +657,11 @@ static void ShowResources() {
                         nullptr, GetModuleHandleW(nullptr), nullptr);
     resourceLabel =
         CaptureControl(resourcesWindow, L"STATIC", ResourceText().c_str(), 0, 15, 15, 510, 280, 0);
+    UiStyle::FitClient(resourcesWindow, 550, 320);
+    UiStyle::Attach(resourcesWindow);
     SetTimer(resourcesWindow, 1, 1000, nullptr);
     ShowWindow(resourcesWindow, SW_RESTORE);
-    SetWindowPos(resourcesWindow, HWND_TOP, 50, 50, 550, 350, SWP_SHOWWINDOW);
+    SetWindowPos(resourcesWindow, HWND_TOP, 50, 50, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE);
     SetForegroundWindow(resourcesWindow);
 }
 static LRESULT CALLBACK SettingsProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
@@ -712,27 +720,32 @@ static void ShowSettings() {
     }
     settingsWindow =
         CreateWindowExW(WS_EX_APPWINDOW, L"Crli.Capture.Settings", L"定时双屏截图 · 设置",
-                        WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, 660, 325, nullptr,
+                        WS_CAPTION | WS_SYSMENU, CW_USEDEFAULT, CW_USEDEFAULT, 660, 400, mainWindow,
                         nullptr, GetModuleHandleW(nullptr), nullptr);
-    CaptureControl(settingsWindow, L"STATIC", L"保存根目录（粘贴完整路径；自动在下面按天建文件夹）",
-                   0, 15, 15, 620, 22, 0);
+    UiStyle::FitClient(settingsWindow, 660, 360);
+    CaptureControl(settingsWindow, L"STATIC", L"定时截图", 0, 24, 18, 612, 32, IDC_UI_TITLE);
+    CaptureControl(settingsWindow, L"STATIC", L"多屏合成一张图片，按日期保存到本地。", 0, 24, 54,
+                   612, 22, IDC_UI_SUBTITLE);
+    CaptureControl(settingsWindow, L"STATIC", L"保存位置", 0, 24, 94, 612, 22, 0);
     dirEdit = CaptureControl(settingsWindow, L"EDIT", settings.directory.c_str(),
-                             WS_BORDER | ES_AUTOHSCROLL, 15, 43, 615, 28, 10);
-    CaptureControl(settingsWindow, L"STATIC", L"文件名格式：HH-mm 为 24 小时制，例如 16-10.png", 0,
-                   15, 88, 615, 22, 0);
+                             WS_BORDER | ES_AUTOHSCROLL, 24, 120, 612, 30, 10);
+    CaptureControl(settingsWindow, L"STATIC", L"文件名格式", 0, 24, 170, 120, 22, 0);
+    CaptureControl(settingsWindow, L"STATIC", L"HH-mm 为 24 小时制，例如 16-10.png", 0, 160, 170,
+                   476, 22, 0);
     formatEdit = CaptureControl(settingsWindow, L"EDIT", settings.format.c_str(),
-                                WS_BORDER | ES_AUTOHSCROLL, 15, 116, 615, 28, 11);
-    CaptureControl(settingsWindow, L"STATIC", L"截图间隔（分钟）：", 0, 15, 164, 160, 22, 0);
+                                WS_BORDER | ES_AUTOHSCROLL, 24, 196, 612, 30, 11);
+    CaptureControl(settingsWindow, L"STATIC", L"截图间隔（分钟）", 0, 24, 246, 140, 22, 0);
     intervalEdit =
         CaptureControl(settingsWindow, L"EDIT", std::to_wstring(settings.intervalMinutes).c_str(),
-                       WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL, 180, 160, 75, 28, 12);
+                       WS_BORDER | ES_NUMBER | ES_AUTOHSCROLL, 170, 240, 75, 30, 12);
     SendMessageW(intervalEdit, EM_SETLIMITTEXT, 4, 0);
-    CaptureControl(settingsWindow, L"STATIC", L"1–1440；按每天零点对齐，默认 10", 0, 270, 164, 360,
+    CaptureControl(settingsWindow, L"STATIC", L"1–1440；按每天零点对齐，默认 10", 0, 262, 246, 374,
                    22, 0);
-    CaptureControl(settingsWindow, L"BUTTON", L"资源占用", BS_PUSHBUTTON, 15, 229, 110, 30, 2);
-    CaptureControl(settingsWindow, L"BUTTON", L"保存", BS_DEFPUSHBUTTON, 510, 229, 120, 30, 1);
+    CaptureControl(settingsWindow, L"BUTTON", L"资源占用", BS_PUSHBUTTON, 24, 306, 110, 32, 2);
+    CaptureControl(settingsWindow, L"BUTTON", L"保存设置", BS_DEFPUSHBUTTON, 516, 306, 120, 32, 1);
+    UiStyle::Attach(settingsWindow, 1, IDC_UI_TITLE, IDC_UI_SUBTITLE);
     ShowWindow(settingsWindow, SW_RESTORE);
-    SetWindowPos(settingsWindow, HWND_TOP, 40, 40, 660, 325, SWP_SHOWWINDOW);
+    SetWindowPos(settingsWindow, HWND_TOP, 40, 40, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE);
     SetForegroundWindow(settingsWindow);
 }
 static void Notification(bool add) {

@@ -6,6 +6,8 @@
 
 设置使用 Windows Common Controls v6 系统主题，统一雅黑字体、紧凑间距、分组框和底部按钮。图标列表优先显示分组与隐藏状态，完整路径位于右侧。设置采用原生 Win32 分页对话框，分为“分组、外观、高级”。底部“应用”统一保存，“关闭”或 Esc 放弃未应用的修改（窗口位置仍记住）。支持 Tab 键切换控件。
 
+1.3.1 统一了浅色界面：白色背景、清晰标题区、蓝色主要操作按钮、浅灰边框和列表行背景。T 面板使用分组卡片与鼠标悬停反馈，仍保留每组单独设置的标签字号、宽高。图标详情和失效规则窗口沿用相同样式；详情默认不全选文本。截图设置同步调整留白、字段布局与屏幕缩放。样式集中在 `src/ui/UiStyle.h`，使用原生控件和库存 GDI 资源，无额外常驻线程或整窗图片缓存。
+
 - 分组：图标列表、组名、分组范围、取消所选分组。
 - 外观：独立选择组名，设置字号、宽度、高度，不改变所选图标的分组。切换组名会暂存上一组的修改，统一应用后写入配置。
 - 高级：图标识别方式与原图标折叠开关。
@@ -155,15 +157,15 @@ Top=100
 
 运行 `build.ps1` 构建 TrayGroups 单一程序。截图源码在 `src/capture/`，截图测试在 `test/capture/`，所有新编译产物写入 `test/build/`。运行 `test/run-all.ps1` 执行全部测试。
 
-运行 `.\package.ps1 -Version v1.3.0` 生成 `.\TrayGroups-v1.3.0-windows-x64.zip`。便携包包含 `TrayGroups.exe`、干净的默认 `groups.ini` 和 README；模板位于 `defaults/groups.ini`，不包含个人分组或恢复记录。`config.json` 首次启动时生成。升级时保留自己已有的配置和恢复文件。打包脚本检查文件是否齐全，并校验版本标签与 EXE 版本一致。
+运行 `.\package.ps1 -Version v1.3.1` 生成 `.\TrayGroups-v1.3.1-windows-x64.zip`。便携包包含 `TrayGroups.exe`、干净的默认 `groups.ini` 和 README；模板位于 `defaults/groups.ini`，不包含个人分组或恢复记录。`config.json` 首次启动时生成。升级时保留自己已有的配置和恢复文件。打包脚本检查文件是否齐全，并校验版本标签与 EXE 版本一致。
 
 每次推送到 `main` 都会通过 GitHub Actions 自动构建、测试并打包，在对应运行页面的 Artifacts 中提供 Windows 便携包；也支持在 Actions 页面手动运行。推送 `v*` 标签时会额外自动创建 Release 并上传便携包。Release 需要仓库允许 Actions 的 `GITHUB_TOKEN` 写入内容。
 
-发布约定：每次完成 bug 修复或新增功能，都必须递增版本号、验证后提交，并为该提交创建及推送 `v版本号` 标签，触发自动构建和 Release。bug 修复递增补丁版本（例如 `v1.1.2`），新增功能递增次版本（例如 `v1.3.0`）；修改 `src/app/AppVersion.h` 中的数字与文本版本即可同步 EXE 资源、启动日志和托盘提示。标签发布后不覆盖或复用，后续修复使用新版本。仅推送 `main` 不算完成上述发布流程。
+发布约定：每次完成 bug 修复或新增功能，都必须递增版本号、验证后提交，并为该提交创建及推送 `v版本号` 标签，触发自动构建和 Release。bug 修复递增补丁版本（例如 `v1.1.2`），新增功能递增次版本（例如 `v1.3.1`）；修改 `src/app/AppVersion.h` 中的数字与文本版本即可同步 EXE 资源、启动日志和托盘提示。标签发布后不覆盖或复用，后续修复使用新版本。仅推送 `main` 不算完成上述发布流程。
 
 每次版本发布前，必须在本地 Windows 上以发布模式运行 `.\build.ps1`，再运行 `.\package.ps1 -Version v版本号`，生成 `.\TrayGroups-v版本号-windows-x64.zip`，方便本地自测，直接在项目根目录查找。ZIP 必须包含对应版本的 `TrayGroups.exe`、默认 `groups.ini` 和 README；生成后校验包内容与 EXE 版本，并在发布说明中给出本地 ZIP 路径。更新版本号或包内文件后，重新生成本地 ZIP。
 
-例如本次版本：提交后执行 `git tag -a v1.3.0 -m "TrayGroups v1.3.0"`，再执行 `git push origin main v1.3.0`，最后确认 Actions 成功且 Release 的便携包可下载。
+例如本次版本：提交后执行 `git tag -a v1.3.1 -m "TrayGroups v1.3.1"`，再执行 `git push origin main v1.3.1`，最后确认 Actions 成功且 Release 的便携包可下载。
 
 ## 本地调试日志
 

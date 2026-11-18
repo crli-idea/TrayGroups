@@ -2,11 +2,13 @@
 // 主窗口私有 T 面板：只列出已确认隐藏的分组图标，点击转发到原程序。
 // items 持有图标副本，本面板只借用；销毁面板时不能重复释放这些 HICON。
 #pragma once
+#include "UiStyle.h"
 
 static void ShowGroup(const std::wstring &group);
 static void ShowGroups();
 static int popupPage = 0, popupPageSize = 16, popupWidth = 420, popupItemTop = 40;
 static int popupItemPage = 0, popupItemPageSize = 16, popupItemPages = 1;
+static int hoverGroup = -1, hoverTile = -1;
 static RECT TileRect(int n) {
     int col = n % 4, row = n / 4;
     return RECT{12 + col * 100, popupItemTop + row * 72, 108 + col * 100,
@@ -86,36 +88,84 @@ static int PopupFooter() {
 }
 static LRESULT CALLBACK PopupProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     switch (msg) {
+    case WM_ERASEBKGND:
+        return 1;
+    case WM_MOUSEMOVE: {
+        POINT point = {GET_X_LPARAM(l), GET_Y_LPARAM(l)};
+        int group = -1;
+        if (showingGroups)
+            for (size_t n = 0; n < groupRects.size(); ++n)
+                if (PtInRect(&groupRects[n], point))
+                    group = (int)n;
+        int tile = TileAt(point);
+        if (hoverGroup != group || hoverTile != tile) {
+            hoverGroup = group;
+            hoverTile = tile;
+            InvalidateRect(h, nullptr, FALSE);
+        }
+        TRACKMOUSEEVENT tracking = {sizeof(tracking), TME_LEAVE, h, 0};
+        TrackMouseEvent(&tracking);
+        return 0;
+    }
+    case WM_MOUSELEAVE:
+        hoverGroup = hoverTile = -1;
+        InvalidateRect(h, nullptr, FALSE);
+        return 0;
+    case WM_SETCURSOR:
+        if (LOWORD(l) == HTCLIENT && (hoverGroup >= 0 || hoverTile >= 0)) {
+            SetCursor(LoadCursorW(nullptr, IDC_HAND));
+            return TRUE;
+        }
+        break;
     case WM_PAINT: {
         PAINTSTRUCT ps;
         HDC dc = BeginPaint(h, &ps);
+        RECT client;
+        GetClientRect(h, &client);
+        UiStyle::Fill(dc, client, UiStyle::Paper());
+        SetDCBrushColor(dc, UiStyle::Line());
+        FrameRect(dc, &client, (HBRUSH)GetStockObject(DC_BRUSH));
         SetBkMode(dc, TRANSPARENT);
-        HFONT old = (HFONT)SelectObject(dc, appFont);
+        SetTextColor(dc, UiStyle::Ink());
+        HFONT old = (HFONT)SelectObject(dc, UiStyle::HeadingFont(h));
         RECT title = {12, 8, popupWidth - 12, 34};
-        std::wstring text = showingGroups ? L"分组列表" : L"‹ 分组    " + activeGroup;
+        std::wstring text = showingGroups ? L"托盘分组" : L"‹  " + activeGroup;
         DrawTextW(dc, text.c_str(), -1, &title, DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
+        SelectObject(dc, appFont);
         if (showingGroups) {
             int dpi = GetDpiForWindow(h);
             for (size_t n = 0; n < groupRects.size(); n++) {
                 const auto &group = popupGroups[popupPage * popupPageSize + n];
                 RECT r = groupRects[n];
-                DrawEdge(dc, &r, EDGE_ETCHED, BF_RECT);
+                bool selected = group == activeGroup;
+                UiStyle::Card(dc, r,
+                              selected               ? UiStyle::Tint()
+                              : (int)n == hoverGroup ? UiStyle::Canvas()
+                                                     : UiStyle::Paper(),
+                              selected ? UiStyle::Accent() : UiStyle::Line());
+                if (selected) {
+                    RECT marker = {r.left + 1, r.top + 9, r.left + 4, r.bottom - 9};
+                    UiStyle::Fill(dc, marker, UiStyle::Accent());
+                }
                 HFONT font = LabelFont(settingsConfig.GroupLabelSize(group), dpi),
                       prior = (HFONT)SelectObject(dc, font);
                 InflateRect(&r, -12, -4);
                 std::wstring label = group;
-                if (group == activeGroup)
-                    FillRect(dc, &r, (HBRUSH)(COLOR_HIGHLIGHT + 1));
-                SetTextColor(dc, group == activeGroup ? GetSysColor(COLOR_HIGHLIGHTTEXT)
-                                                      : GetSysColor(COLOR_WINDOWTEXT));
+                SetTextColor(dc, selected
+                                     ? (UiStyle::highContrast ? GetSysColor(COLOR_HIGHLIGHTTEXT)
+                                                              : UiStyle::Accent())
+                                     : UiStyle::Ink());
                 DrawTextW(dc, label.c_str(), -1, &r,
                           DT_SINGLELINE | DT_VCENTER | DT_END_ELLIPSIS | DT_NOPREFIX);
                 SelectObject(dc, prior);
                 DeleteObject(font);
             }
-            SetTextColor(dc, GetSysColor(COLOR_WINDOWTEXT));
+            SetTextColor(dc, UiStyle::Muted());
             RECT selected = {12, popupItemTop - 28, popupWidth - 12, popupItemTop - 4};
-            std::wstring groupName = activeGroup;
+            std::wstring groupName =
+                activeGroup.empty()
+                    ? L"分组图标"
+                    : activeGroup + L"  ·  " + Number(popupItems.size()) + L" 个图标";
             DrawTextW(dc, groupName.c_str(), -1, &selected,
                       DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
         }
@@ -123,7 +173,9 @@ static LRESULT CALLBACK PopupProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             for (size_t n = 0; n < popupItems.size(); n++) {
                 auto &i = items[popupItems[n]];
                 RECT r = TileRect((int)n);
-                DrawEdge(dc, &r, EDGE_ETCHED, BF_RECT);
+                UiStyle::Card(dc, r, (int)n == hoverTile ? UiStyle::Tint() : UiStyle::Canvas(),
+                              (int)n == hoverTile ? UiStyle::Accent() : UiStyle::Canvas());
+                SetTextColor(dc, UiStyle::Ink());
                 DrawIconEx(dc, r.left + 35, r.top + 6, i.image, 24, 24, 0, nullptr, DI_NORMAL);
                 RECT label = {r.left + 3, r.top + 36, r.right - 3, r.bottom - 2};
                 std::wstring name = ItemLabel(i);
@@ -131,6 +183,7 @@ static LRESULT CALLBACK PopupProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
                           DT_CENTER | DT_SINGLELINE | DT_END_ELLIPSIS | DT_NOPREFIX);
             }
             if (popupItems.empty()) {
+                SetTextColor(dc, UiStyle::Muted());
                 RECT empty = {12, popupItemTop + 12, popupWidth - 12, popupItemTop + 66};
                 const wchar_t *message = !settingsConfig.foldIcons
                                              ? L"折叠已暂停；可在设置的高级页开启"
@@ -139,6 +192,7 @@ static LRESULT CALLBACK PopupProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
                 DrawTextW(dc, message, -1, &empty, DT_CENTER | DT_SINGLELINE | DT_NOPREFIX);
             }
         }
+        SetTextColor(dc, UiStyle::Muted());
         if (showingGroups && popupGroups.size() > (size_t)popupPageSize) {
             RECT footer = {12, PopupFooter(), popupWidth - 12, PopupFooter() + 26};
             DrawTextW(dc, L"‹ 上一页                        下一页 ›", -1, &footer,
@@ -150,6 +204,13 @@ static LRESULT CALLBACK PopupProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             std::wstring page = L"‹ 上一页           " + Number(popupItemPage + 1) + L" / " +
                                 Number(popupItemPages) + L"           下一页 ›";
             DrawTextW(dc, page.c_str(), -1, &footer, DT_SINGLELINE | DT_CENTER);
+        }
+        if (HWND status = GetDlgItem(h, CaptureStatusControl)) {
+            RECT footer;
+            GetWindowRect(status, &footer);
+            MapWindowPoints(nullptr, h, (POINT *)&footer, 2);
+            RECT line = {12, footer.top - 8, popupWidth - 12, footer.top - 7};
+            UiStyle::Fill(dc, line, UiStyle::Line());
         }
         SelectObject(dc, old);
         EndPaint(h, &ps);
@@ -260,9 +321,12 @@ static LRESULT CALLBACK PopupProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
 }
 static HWND NewPopup() {
     RECT work = CursorWorkArea();
-    return CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, L"托盘分组",
-                           WS_POPUP | WS_BORDER, work.left + 8, work.top + 8, 420, 100, mainWindow,
-                           nullptr, GetModuleHandleW(nullptr), nullptr);
+    hoverGroup = hoverTile = -1;
+    HWND popup = CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, L"托盘分组",
+                                 WS_POPUP, work.left + 8, work.top + 8, 420, 100, mainWindow,
+                                 nullptr, GetModuleHandleW(nullptr), nullptr);
+    UiStyle::Attach(popup, CaptureTimer::CaptureNowCommand, 0, CaptureStatusControl);
+    return popup;
 }
 static void AttachCaptureControls(int top) {
     struct Entry {
@@ -288,6 +352,7 @@ static void AttachCaptureControls(int top) {
         else
             LogError(L"创建截图控件失败，Win32=" + Number(GetLastError()));
     }
+    UiStyle::StyleChildren(popupWindow);
     SetTimer(popupWindow, PopupStatusTimer, 1000, nullptr);
     DebugLog::Write(L"POPUP capture controls attached; " + status);
 }
