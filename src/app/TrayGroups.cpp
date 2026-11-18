@@ -57,9 +57,7 @@ static const int ResourceTimer = 2, RefreshTimer = 3, SingleTimer = 4, ReFoldTim
 static HWND mainWindow = nullptr, popupWindow = nullptr, settingsWindow = nullptr,
             resourceWindow = nullptr;
 static HWND listWindow = nullptr, groupEdit = nullptr, foldCheck = nullptr, resourceText = nullptr;
-static HWND scopeEdit = nullptr, matchEdit = nullptr, labelSizeEdit = nullptr,
-            labelWidthEdit = nullptr, labelHeightEdit = nullptr;
-static bool labelEditing = false;
+static HWND scopeEdit = nullptr, matchEdit = nullptr;
 static NativeHandles::Icon appIcon;
 static std::vector<std::wstring> popupGroups;
 static HIMAGELIST settingsImages = nullptr;
@@ -460,15 +458,6 @@ static std::set<std::wstring> GroupNames() {
     for (const auto &i : settingsConfig.programAssignments)
         if (!i.second.empty())
             groups.insert(i.second);
-    for (const auto &i : settingsConfig.groupLabelSizes)
-        if (!i.first.empty())
-            groups.insert(i.first);
-    for (const auto &i : settingsConfig.groupLabelWidths)
-        if (!i.first.empty())
-            groups.insert(i.first);
-    for (const auto &i : settingsConfig.groupLabelHeights)
-        if (!i.first.empty())
-            groups.insert(i.first);
     return groups;
 }
 static void SyncNotifications() {
@@ -560,7 +549,7 @@ static void ClosePopup() {
     if (popupWindow)
         DestroyWindow(popupWindow);
 }
-static void ShowSettings();
+static void ShowSettings(int page = 0);
 static void ShowResources();
 static std::wstring ResourceReport(bool json = false) {
     auto actual = NativeResources::Read();
@@ -610,7 +599,7 @@ static std::wstring ResourceReport(bool json = false) {
     return result;
 }
 
-#include "../ui/CompactPopup.h"
+#include "../ui/NativeTrayPanel.h"
 
 static HWND Control(HWND parent, const wchar_t *cls, const wchar_t *text, DWORD style, int x, int y,
                     int width, int height, int id) {
@@ -724,6 +713,10 @@ static void RootMenu() {
             DebugLog::Write(L"DEBUG logging enabled");
         return;
     }
+    if (id == CaptureTimer::SettingsCommand) {
+        ShowSettings(2);
+        return;
+    }
     if (CaptureTimer::HandleMenu(id))
         return;
     if (id == 1)
@@ -835,6 +828,10 @@ static LRESULT CALLBACK MainProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     }
     if (msg == WM_COMMAND && LOWORD(w) == IDC_RESTORE_ALL) {
         RestoreAllOwnedIcons();
+        return 0;
+    }
+    if (msg == WM_COMMAND && LOWORD(w) == CaptureTimer::SettingsCommand) {
+        ShowSettings(2);
         return 0;
     }
     if (msg == WM_COMMAND && CaptureTimer::HandleMenu(LOWORD(w)))
@@ -1016,7 +1013,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR cmd, int) {
         ShowSettings();
     MSG msg;
     while (GetMessageW(&msg, nullptr, 0, 0) > 0) {
-        if (settingsWindow && IsDialogMessageW(settingsWindow, &msg))
+        if (settingsWindow && PropSheet_IsDialogMessage(settingsWindow, &msg))
             continue;
         TranslateMessage(&msg);
         DispatchMessageW(&msg);

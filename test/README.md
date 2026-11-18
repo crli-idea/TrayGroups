@@ -1,6 +1,6 @@
 # 测试目录
 
-`CompactPopup.tests.h` 验证紧凑面板多组同时展开、四列、青绿色方案、图标快照隔离、重绘句柄稳定、固定截图区、滚动/键盘到达最后图标、滚动命中和 Esc；自测图在 `build/compact-panel-preview.bmp`。`core-modules.ps1` 验证配置默认值和往返、分组顺序、纯布局缩放及滚动范围。`ui-preview/` 是独立离线 HTML 设计预览，不参与原生程序运行。
+`NativeTrayPanel.tests.h` 验证系统 ListView 多组同时展开、四列、图标快照隔离、重绘句柄稳定、固定截图区、滚动到达最后图标和 Esc；自测图在 `build/native-panel-preview.bmp`。`core-modules.ps1` 验证配置默认值、往返和非法参数处理。`ui-preview/` 是独立离线 HTML 设计预览，不参与原生程序运行。
 
 `guid-research/` 的 [托盘 GUID 回归测试](guid-research/README.md) 直接链接正式 `TrayGuid.cpp`，验证内部 COM 快照、普通/GUID 图标识别与隐藏恢复；自测入口不参与正式构建。
 
@@ -23,3 +23,8 @@
 `GuiResources.ps1` 为独立 GUI 测试嵌入与正式程序相同的 Common Controls v6 清单，确保系统主题和控件子类接口可用。界面回归检查两种缩放下的控件边界，以及主操作按钮的 Tab、Enter 和 Esc 行为；预览图片也写入 `build/`。
 
 `core-modules.ps1` 也验证失效规则诊断、重新绑定的冲突/进程变化拒绝、显式取消分组保留，以及 RAII 句柄、远程缓冲区、图标复制/移动/容器析构。`TrayInspector.tests.h` 随设置页回归运行，检查详情和规则窗口的内容、布局、取消与确认行为。截图模块测试包含 1、7、15、90、1440 分钟及跨日边界、非法值回退；集成测试检查界面保存间隔后重新调度。
+
+
+系统控件回归覆盖五个 PropertySheet 页面、应用/确定/取消、截图页保存与取消、窗口位置、真实测试托盘图标的左键/双击/右键、四列分组布局、100 图标滚动及固定底栏。UI 报告使用任务管理器专用工作集口径，设置和面板均检查小于 7 MiB；输出在 `test/build/ui-self-test-*.txt`。原型/测试图示中的“示例”图标为合成数据，不代表已安装应用。
+
+本地可设置 `$env:TRAYGROUPS_TEST_REAL_CAPTURE='1'` 后运行 `run.ps1`，额外在设置窗口打开时截取真实桌面，检查 PNG 的尺寸等于整个物理虚拟桌面，并检查采样峰值小于 7 MiB。图片只保存在忽略的 `test/build/native-ui-capture/Captures/`，不会打包或上传；CI 默认不启用真实桌面截图。

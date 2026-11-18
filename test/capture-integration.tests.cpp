@@ -118,7 +118,7 @@ int WINAPI wWinMain(HINSTANCE instance,HINSTANCE,LPWSTR,int){
     outcome=false;CaptureTimer::HandleMenu(CaptureTimer::CaptureNowCommand);
     check(WaitForCompletion()&&CaptureTimer::StatusText().find(L"失败")!=std::wstring::npos,L"failed worker clears busy state and shows failure");
     wc.lpfnWndProc=PopupProc;wc.lpszClassName=PopupClass;RegisterClassW(&wc);
-    popupWindow=NewPopup();AttachCaptureControls(20);
+    OpenTrayPanel();
     check(GetDlgItem(popupWindow,CaptureStatusControl)&&GetDlgItem(popupWindow,CaptureTimer::SettingsCommand)&&GetDlgItem(popupWindow,IDC_RESTORE_ALL),L"T panel has screenshot controls and a restore-all button");
     outcome=true;HWND popup=popupWindow;
     SendMessageW(popup,WM_COMMAND,CaptureTimer::CaptureNowCommand,0);

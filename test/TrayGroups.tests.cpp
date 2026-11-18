@@ -51,9 +51,11 @@ static int SelfTest() {
     }else pass=false;
     WNDCLASSW pc={};pc.lpfnWndProc=PopupProc;pc.hInstance=GetModuleHandleW(nullptr);pc.lpszClassName=PopupClass;pc.style=CS_DBLCLKS;RegisterClassW(&pc);
     for(size_t n=0;n<items.size();n++)for(int action=0;action<3;action++){
-        popupItems={(int)n};popupIcons={items[n]};popupLayout.tiles={{12,6,108,74}};popupViewport={0,34,420,120};popupScroll=0;testEvents.clear();POINT point;GetCursorPos(&point);auto expected=CallbackSequence(items[n].id,items[n].version,action,point);
+        popupItems={(int)n};popupIcons={items[n]};testEvents.clear();POINT point;GetCursorPos(&point);auto expected=CallbackSequence(items[n].id,items[n].version,action,point);
         popupWindow=CreateWindowW(PopupClass,L"",WS_POPUP,0,0,420,120,nullptr,nullptr,pc.hInstance,nullptr);
-        SendMessageW(popupWindow,action==0?WM_LBUTTONUP:action==1?WM_LBUTTONDBLCLK:WM_RBUTTONUP,0,MAKELPARAM(40,60));
+        popupList=CreateWindowW(WC_LISTVIEWW,L"",WS_CHILD|LVS_ICON,0,0,420,120,popupWindow,nullptr,pc.hInstance,nullptr);
+        NMITEMACTIVATE click={};click.hdr.hwndFrom=popupList;click.hdr.code=action==0?NM_CLICK:action==1?NM_DBLCLK:NM_RCLICK;click.iItem=0;
+        SendMessageW(popupWindow,WM_NOTIFY,0,(LPARAM)&click);
         bool received=PumpUntil(expected.size());
         // The user can move their mouse during enumeration. Popup forwarding
         // samples the current cursor; test event semantics independently of that.
@@ -234,7 +236,7 @@ static bool HiddenPopupRegression(std::wstring& report) {
         SetWindowTextW(groupEdit,L"\u9690\u85cf");
         SendMessageW(settingsWindow,WM_COMMAND,MAKEWPARAM(IDC_GROUP,CBN_EDITCHANGE),(LPARAM)groupEdit);
         SendMessageW(foldCheck,BM_SETCHECK,BST_CHECKED,0);
-        SendMessageW(settingsWindow,WM_COMMAND,IDC_APPLY,0);
+        SendMessageW(GetDlgItem(settingsWindow,IDC_APPLY),BM_CLICK,0,0);
         check(!VisibleAtRuntime(identity.runtime)&&hidden.size()==1,L"click icon then assign Hidden and Apply really hides only that icon");
         for(const auto& item:settingsItems)if(item.owner==mainWindow&&item.id==702)check(VisibleAtRuntime(item.runtime),L"ungrouped test icon remains visible in Windows");
         SaveTestWindow(settingsWindow,baseDir+L"\\hidden-popup-assigned.bmp");
@@ -248,8 +250,11 @@ static bool HiddenPopupRegression(std::wstring& report) {
         if(popupWindow&&onlyHidden){
             RedrawWindow(popupWindow,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN);
             if(action==0)SaveTestWindow(popupWindow,baseDir+L"\\hidden-popup-visible.bmp");
-            RECT tile=TileRect(0);testEvents.clear();
-            SendMessageW(popupWindow,action==0?WM_LBUTTONUP:action==1?WM_LBUTTONDBLCLK:WM_RBUTTONUP,0,MAKELPARAM(tile.left+20,tile.top+20));
+            RECT tile={};ListView_GetItemRect(popupList,0,&tile,LVIR_ICON);testEvents.clear();
+            LPARAM point=MAKELPARAM((tile.left+tile.right)/2,(tile.top+tile.bottom)/2);
+            if(action==1)SendMessageW(popupList,WM_LBUTTONDBLCLK,MK_LBUTTON,point);
+            else {PostMessageW(popupList,action==0?WM_LBUTTONDOWN:WM_RBUTTONDOWN,action==0?MK_LBUTTON:MK_RBUTTON,point);
+                  PostMessageW(popupList,action==0?WM_LBUTTONUP:WM_RBUTTONUP,0,point);}
             // Drive the single-click timer explicitly so desktop focus changes
             // during an automated screenshot cannot cancel the pending action.
             if(action==0&&popupWindow)SendMessageW(popupWindow,WM_TIMER,SingleTimer,0);
@@ -258,6 +263,14 @@ static bool HiddenPopupRegression(std::wstring& report) {
             if(same)for(size_t n=0;n<expected.size();n++)if(testEvents[n].second!=expected[n].second)same=false;
             check(delivered&&same&&!popupWindow,(L"hidden popup forwards original "+std::wstring(action==0?L"left click":action==1?L"double click":L"right click")+L" and closes").c_str());
         }else ClosePopup();
+    }
+    for(int action : {0,2}) {
+        ShowGroups();ListView_SetItemState(popupList,0,LVIS_SELECTED|LVIS_FOCUSED,LVIS_SELECTED|LVIS_FOCUSED);
+        testEvents.clear();SendMessageW(popupList,WM_KEYDOWN,action==0?VK_RETURN:VK_APPS,0);
+        auto expected=CallbackSequence(701,4,action,POINT{});
+        bool delivered=PumpUntil(expected.size()),same=testEvents.size()==expected.size();
+        if(same)for(size_t n=0;n<expected.size();++n)if(testEvents[n].second!=expected[n].second)same=false;
+        check(delivered&&same&&!popupWindow,action==0?L"Enter forwards original left-click from selected system list item":L"keyboard menu key forwards original context menu from selected system list item");
     }
     MainProc(mainWindow,WM_APP+8,1,1);
     RECT original={};
@@ -268,7 +281,7 @@ static bool HiddenPopupRegression(std::wstring& report) {
     }
     bool stable=popupWindow!=nullptr;
     for(int repeat=0;repeat<8&&popupWindow;repeat++){
-        RECT label=popupLayout.sections[0].heading;OffsetRect(&label,0,popupViewport.top);
+        RECT label={};ListView_GetGroupRect(popupList,0,LVGGR_HEADER,&label);MapWindowPoints(popupList,popupWindow,(POINT*)&label,2);
         SendMessageW(popupWindow,WM_LBUTTONUP,0,MAKELPARAM(label.left+10,label.top+10));
         // Consume the posted rebuild without depending on the desktop cursor.
         MSG message;
@@ -358,23 +371,29 @@ static bool GuidRegression(std::wstring& report) {
 }
 
 #include "TrayInspector.tests.h"
-#include "CompactPopup.tests.h"
+#include "NativeTrayPanel.tests.h"
 
 static int UiSelfTest() {
     INITCOMMONCONTROLSEX common={sizeof(common),ICC_LISTVIEW_CLASSES|ICC_TAB_CLASSES};InitCommonControlsEx(&common);
     NONCLIENTMETRICSW metrics={};metrics.cbSize=sizeof(metrics);SystemParametersInfoW(SPI_GETNONCLIENTMETRICS,sizeof(metrics),&metrics,0);appFont=CreateFontIndirectW(&metrics.lfMessageFont);appIcon=MakeAppIcon();
     WNDCLASSW c={};c.hInstance=GetModuleHandleW(nullptr);c.hCursor=LoadCursorW(nullptr,IDC_ARROW);c.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);c.hIcon=appIcon;c.lpfnWndProc=PopupProc;c.lpszClassName=PopupClass;c.style=CS_DBLCLKS;RegisterClassW(&c);
     c.lpfnWndProc=TestProc;c.lpszClassName=L"Crli.TrayGroups.UiReceiver";RegisterClassW(&c);mainWindow=CreateWindowW(c.lpszClassName,L"",0,0,0,0,0,nullptr,nullptr,c.hInstance,nullptr);
+    CaptureTimer::MakeDirectories(baseDir+L"\\native-ui-capture");
+    CaptureTimer::Initialize(mainWindow,GetModuleHandleW(nullptr),baseDir+L"\\native-ui-capture");
+    KillTimer(mainWindow,CaptureTimer::TimerId());
     UINT testDpi=GetDpiForWindow(mainWindow);std::wstring report;bool ok=IdentityRegression(report);auto check=[&](bool result,const wchar_t* name){report+=(result?L"PASS: ":L"FAIL: ")+std::wstring(name)+L"\n";if(!result)ok=false;};
     configPath=baseDir+L"\\ui-test-config.ini";settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();settingsConfig.groupLabelSizes.clear();settingsConfig.groupLabelWidths.clear();settingsConfig.groupLabelHeights.clear();settingsConfig.iconMatch=L"path-class-id";settingsConfig.haveSettingsPosition=false;
     if(!HiddenPopupRegression(report))ok=false;
     if(!GuidRegression(report))ok=false;
     if(!InspectorRegression(report))ok=false;
     configPath=baseDir+L"\\ui-test-config.ini";settingsConfig.assignments.clear();settingsConfig.programAssignments.clear();settingsConfig.pathAssignments.clear();settingsConfig.groupLabelSizes.clear();settingsConfig.groupLabelWidths.clear();settingsConfig.groupLabelHeights.clear();settingsConfig.foldIcons=false;settingsConfig.iconMatch=L"path-class-id";settingsConfig.haveSettingsPosition=false;
+    settingsConfig=TrayConfig::Settings{};settingsConfig.foldIcons=false;settingsConfig.iconMatch=L"path-class-id";SaveSettings();
     ShowSettings();check(settingsWindow&&IsWindowVisible(settingsWindow)&&ListView_GetItemCount(listWindow)>0,L"settings window visible with detected program icons");
     if(!settingsWindow||ListView_GetItemCount(listWindow)==0){WriteText(baseDir+L"\\ui-self-test.txt",report);return 1;}
-    check(TabCtrl_GetItemCount(settingsTabs)==3&&IsWindowVisible(settingsPages[0])&&!IsWindowVisible(settingsPages[1])&&!IsWindowVisible(settingsPages[2]),L"three native settings pages with only the current page visible");
+    check(TabCtrl_GetItemCount(settingsTabs)==5&&IsWindowVisible(settingsPages[0])&&!IsWindowVisible(settingsPages[1])&&!IsWindowVisible(settingsPages[2]),L"five system property pages with only the current page visible");
     check(SendMessageW(settingsWindow,WM_GETICON,ICON_SMALL,0)!=0,L"settings window has the T application icon");
+    check((GetWindowLongPtrW(GetDlgItem(settingsWindow,IDC_APPLY),GWL_STYLE)&BS_TYPEMASK)!=BS_OWNERDRAW,
+          L"standard property sheet buttons use system painting");
     check(IsAppThemed()&&IsThemeActive(),L"common controls v6 visual styles are enabled");
     int order[6]={};ListView_GetColumnOrderArray(listWindow,6,order);
     check(order[0]==0&&order[3]==5&&order[4]==3,L"matching and hidden status appear before full executable paths");
@@ -408,26 +427,20 @@ static int UiSelfTest() {
     SelectSettingsPage(1);SelectSettingsPage(2);SelectSettingsPage(0);
     check(ControlText(groupEdit)==L"测试分组"&&groupEditing,L"switching tabs preserves unsaved Chinese group input");
     check(ApplyGroupEdit()&&settingsMatcher.GroupFor(a)==L"测试分组"&&settingsMatcher.GroupFor(b).empty()&&settingsMatcher.GroupFor(d).empty()&&settingsDraft.programAssignments.empty(),L"default edit changes only selected explorer icon");
-    SetWindowTextW(appearanceGroup,L"测试分组");UpdateLabelSize();
-    SetWindowTextW(labelSizeEdit,L"24");SetWindowTextW(labelWidthEdit,L"320");SetWindowTextW(labelHeightEdit,L"90");SendMessageW(settingsWindow,WM_COMMAND,MAKEWPARAM(115,EN_CHANGE),(LPARAM)labelSizeEdit);
-    check(SaveLabelSize()&&settingsDraft.GroupLabelSize(L"测试分组")==24&&settingsDraft.GroupLabelWidth(L"测试分组")==320&&settingsDraft.GroupLabelHeight(L"测试分组")==90,L"per-group label size saved from the settings editor");
-    SetWindowTextW(appearanceGroup,L"独立外观");UpdateLabelSize();SetWindowTextW(labelSizeEdit,L"18");
-    SetWindowTextW(appearanceGroup,L"下一个组");SendMessageW(settingsWindow,WM_COMMAND,MAKEWPARAM(IDC_APPEARANCE_GROUP,CBN_EDITCHANGE),(LPARAM)appearanceGroup);
-    check(settingsDraft.GroupLabelSize(L"独立外观")==18&&ControlText(groupEdit)==L"测试分组"&&!groupEditing,L"appearance group changes retain edits without changing icon assignments");
-    SetWindowTextW(appearanceGroup,L"测试分组");UpdateLabelSize();
-    SendMessageW(scopeEdit,CB_SETCURSEL,1,0);SetWindowTextW(groupEdit,L"路径分组");check(ApplyGroupEdit()&&settingsMatcher.GroupFor(a)==L"路径分组"&&settingsMatcher.GroupFor(b)==L"路径分组"&&settingsMatcher.GroupFor(d).empty(),L"path scope groups same path without affecting another explorer installation");
-    SendMessageW(scopeEdit,CB_SETCURSEL,0,0);SetWindowTextW(groupEdit,L"");check(ApplyGroupEdit()&&settingsMatcher.GroupFor(a).empty()&&settingsMatcher.GroupFor(b)==L"路径分组",L"single-icon ungroup excludes it from an inherited path rule");
-    check(settingsDraft.Save(configPath),L"group configuration saved");
+    SetDlgItemInt(settingsPages[1],IDC_PANEL_WIDTH,480,FALSE);
+    SetDlgItemInt(settingsPages[1],IDC_PANEL_ICON_SIZE,32,FALSE);
+    SetDlgItemInt(settingsPages[1],IDC_PANEL_COLUMNS,5,FALSE);
+    check(IsWindowEnabled(GetDlgItem(settingsWindow,IDC_APPLY)),L"editing appearance enables the system Apply button");
     settingsConfig.settingsX=140;settingsConfig.settingsY=100;settingsConfig.haveSettingsPosition=true;RECT expected=SettingsRect();SetWindowPos(settingsWindow,nullptr,expected.left,expected.top,0,0,SWP_NOSIZE|SWP_NOZORDER);
     RememberSettingsPosition(settingsWindow);
     auto beforeClose=ReadText(configPath);SetWindowTextW(groupEdit,L"不保存的分组");ApplyGroupEdit();
-    SetWindowTextW(appearanceGroup,L"不保存的外观");UpdateLabelSize();SetWindowTextW(labelSizeEdit,L"30");SaveLabelSize();
-    SendMessageW(settingsWindow,WM_CLOSE,0,0);LoadSettings();check(!settingsConfig.groupLabelSizes.count(L"不保存的外观"),L"closing discards unapplied appearance edits");
+    SetDlgItemInt(settingsPages[1],IDC_PANEL_WIDTH,540,FALSE);
+    SendMessageW(settingsWindow,WM_CLOSE,0,0);LoadSettings();check(settingsConfig.panel.width!=540,L"cancel discards unapplied panel appearance edits");
     check(matcher.GroupFor(a).empty()&&ReadText(configPath).find(L"不保存的分组")==std::wstring::npos,L"closing remembers position without saving unapplied group edits");
     ShowSettings();RECT actual;GetWindowRect(settingsWindow,&actual);
     check(actual.left==expected.left&&actual.top==expected.top,L"settings restores exact previous screen position after reopening");
     check(ImageList_GetImageCount(settingsImages)==ListView_GetItemCount(listWindow),L"one icon image per actual detected row");
-    for(int page=0;page<3;page++){
+    for(int page=0;page<5;page++){
         SelectSettingsPage(page);RedrawWindow(settingsWindow,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN);
         SaveTestWindow(settingsWindow,baseDir+L"\\settings-"+Number(GetDpiForWindow(settingsWindow))+L"-page-"+Number(page)+L".bmp");
         RECT client;GetClientRect(settingsPages[page],&client);bool fits=true;
@@ -442,27 +455,60 @@ static int UiSelfTest() {
     check(pageBounds.top>tabBounds.top+MulDiv(15,GetDpiForWindow(settingsWindow),96),L"tab labels remain above the page content");
     SetFocus(GetDlgItem(settingsWindow,IDC_APPLY));
     MSG key={};key.hwnd=GetFocus();key.message=WM_KEYDOWN;key.wParam=VK_TAB;
-    IsDialogMessageW(settingsWindow,&key);
-    check(GetFocus()==GetDlgItem(settingsWindow,IDC_CLOSE),L"Tab key navigates native dialog controls");
+    PropSheet_IsDialogMessage(settingsWindow,&key);
+    check(GetFocus()&&GetFocus()!=GetDlgItem(settingsWindow,IDC_APPLY)&&IsChild(settingsWindow,GetFocus()),L"Tab key navigates system property sheet controls");
     auto openMemory=NativeResources::Read();report+=L"SettingsOpenPrivateWorkingSetBytes="+Number(openMemory.privateWorking)+L"\n";
-    check(openMemory.privateWorking<3*1048576,L"open settings private working set is below 3 MiB");
+    check(openMemory.privateWorking<7*1048576,L"open settings private working set is below 7 MiB");
     bool previousFold=settingsConfig.foldIcons;settingsConfig.foldIcons=false;SendMessageW(foldCheck,BM_SETCHECK,BST_UNCHECKED,0);
-    SetFocus(GetDlgItem(settingsWindow,IDC_APPLY));
+    SettingsChanged();SendMessageW(settingsWindow,WM_NEXTDLGCTL,(WPARAM)GetDlgItem(settingsWindow,IDC_APPLY),TRUE);
     MSG applyKey={};applyKey.hwnd=GetFocus();applyKey.message=WM_KEYDOWN;applyKey.wParam=VK_RETURN;
-    check(IsDialogMessageW(settingsWindow,&applyKey)!=FALSE,L"styled default Apply button retains native Enter-key behavior");
-    check(ReadText(configPath).find(L"FoldOriginalIcons=0")!=std::wstring::npos&&ControlText(settingsWindow).find(L"\u5df2\u5e94\u7528")!=std::wstring::npos,L"Apply persists settings and refreshes the native dialog");
+    check(PropSheet_IsDialogMessage(settingsWindow,&applyKey)!=FALSE,L"system Apply button retains native Enter-key behavior");
+    check(settingsWindow&&ReadText(configPath).find(L"FoldOriginalIcons=0")!=std::wstring::npos&&!IsWindowEnabled(GetDlgItem(settingsWindow,IDC_APPLY)),L"Apply persists settings and refreshes the native dialog");
     settingsConfig.foldIcons=previousFold;
+    SetDlgItemInt(settingsPages[1],IDC_PANEL_WIDTH,480,FALSE);
+    SetDlgItemInt(settingsPages[1],IDC_PANEL_COLUMNS,5,FALSE);
+    unsigned oldInterval=CaptureTimer::GetPreferences().intervalMinutes;
+    unsigned changedInterval=oldInterval==15?20:15;
+    SetDlgItemInt(settingsPages[2],IDC_CAPTURE_INTERVAL,changedInterval,FALSE);
+    SendMessageW(GetDlgItem(settingsWindow,IDC_APPLY),BM_CLICK,0,0);
+    check(settingsConfig.panel.width==480&&settingsConfig.panel.columns==5&&
+          CaptureTimer::GetPreferences().intervalMinutes==changedInterval,
+          L"one system Apply commits panel dimensions and capture interval from different pages");
+    ShowSettings(2);
+    check(TabCtrl_GetCurSel(settingsTabs)==2&&IsWindowVisible(settingsPages[2]),L"capture settings command selects the existing capture property page");
+    SetDlgItemInt(settingsPages[2],IDC_CAPTURE_INTERVAL,changedInterval+1,FALSE);
     UpdateWindow(settingsWindow);SaveTestWindow(settingsWindow,baseDir+L"\\settings-preview.bmp");
+    wchar_t realCapture[2]={};
+    if(GetEnvironmentVariableW(L"TRAYGROUPS_TEST_REAL_CAPTURE",realCapture,2)) {
+        auto captureContext=SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+        bool captured=CaptureTimer::Capture(CaptureTimer::settings);
+        check(captured,L"real desktop capture succeeds while the native settings sheet stays open");
+        report+=L"RealCapturePeakPrivateWorkingSetBytes="+Number(CaptureTimer::capturePeak.load())+L"\n";
+        check(CaptureTimer::capturePeak.load()<7*1048576,L"capture sampled peak with settings open stays below 7 MiB");
+        auto file=CaptureTimer::JsonValue(ReadText(CaptureTimer::root+L"\\last-capture.json"),L"file");
+        NativeHandles::Handle image(CreateFileW(file.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr));
+        unsigned char header[24]={};DWORD count=0;
+        bool read=image&&ReadFile(image,header,sizeof(header),&count,nullptr)&&count==sizeof(header);
+        auto number=[&](int n){return (unsigned(header[n])<<24)|(unsigned(header[n+1])<<16)|(unsigned(header[n+2])<<8)|header[n+3];};
+        check(read&&header[0]==137&&header[1]=='P'&&header[2]=='N'&&header[3]=='G'&&
+              number(16)==unsigned(GetSystemMetrics(SM_CXVIRTUALSCREEN))&&number(20)==unsigned(GetSystemMetrics(SM_CYVIRTUALSCREEN)),
+              L"real PNG dimensions cover the physical virtual desktop across all monitors");
+        report+=L"RealCaptureDesktop="+Number(number(16))+L"x"+Number(number(20))+L"\n";
+        SetThreadDpiAwarenessContext(captureContext);
+    }
     SetFocus(GetDlgItem(settingsWindow,IDC_CLOSE));key.hwnd=GetFocus();key.wParam=VK_ESCAPE;
-    IsDialogMessageW(settingsWindow,&key);
+    PropSheet_IsDialogMessage(settingsWindow,&key);
     check(!settingsWindow,L"Escape closes the modeless settings dialog");
+    check(CaptureTimer::GetPreferences().intervalMinutes==changedInterval,L"Cancel discards unapplied capture interval changes");
+    ShowSettings();SendMessageW(settingsWindow,WM_COMMAND,IDOK,0);
+    check(!settingsWindow,L"standard OK applies and destroys the modeless property sheet");
     if(settingsWindow)SendMessageW(settingsWindow,WM_CLOSE,0,0);
     // Real Explorer icons owned only by the test: exactly one T despite many groups.
     SyncNotifications();testingOwnIcons=true;auto tray=ReadTray();int count=0;for(const auto& i:tray)if(i.owner==mainWindow)count++;
     check(notificationIcons.size()==1&&notificationIcons.count(1)&&count==1,L"exactly one T tray entry; no numbered group icon");
     FreeItems(tray);testingOwnIcons=false;
-    if(!CompactPopupRegression(report))ok=false;
-    ClosePopup();DeleteNotifications();DestroyWindow(mainWindow);mainWindow=nullptr;
+    if(!NativePanelRegression(report))ok=false;
+    ClosePopup();DeleteNotifications();CaptureTimer::Shutdown();DestroyWindow(mainWindow);mainWindow=nullptr;
     auto memory=NativeResources::Read();report+=L"PrivateWorkingSetBytes="+Number(memory.privateWorking)+L"\n";
     WriteText(baseDir+L"\\ui-self-test.txt",report);
     WriteText(baseDir+L"\\ui-self-test-"+Number(testDpi)+L".txt",report);

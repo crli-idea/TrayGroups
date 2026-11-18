@@ -1,5 +1,5 @@
 // 主窗口私有设置页实现；布局定义在 resources/TrayGroups.rc。
-// 分组/外观编辑先留在界面状态，点“应用”才保存；关闭只合并窗口位置。
+// PropertySheet 管理分页和标准按钮；编辑副本只在应用时保存。
 #pragma once
 #include "TraySettingsIds.h"
 #include "TrayInspector.h"
@@ -9,8 +9,9 @@
 static TrayConfig::Settings settingsDraft;
 static TrayIdentity::MatchState settingsMatchState;
 static TrayIdentity::Matcher settingsMatcher(settingsDraft, settingsMatchState);
-static HWND settingsTabs = nullptr, settingsPages[3] = {}, appearanceGroup = nullptr;
-static std::wstring appearanceName;
+static constexpr int SettingsPageCount = 5;
+static HWND settingsTabs = nullptr, settingsPages[SettingsPageCount] = {};
+static CaptureTimer::Preferences captureDraft;
 static int settingsWidth = 1000, settingsHeight = 680;
 
 static std::wstring ControlText(HWND control) {
@@ -25,12 +26,7 @@ static void FillGroupChoices() {
         for (const auto &rule : *rules)
             if (!rule.second.empty())
                 groups.insert(rule.second);
-    for (const auto *sizes : {&settingsDraft.groupLabelSizes, &settingsDraft.groupLabelWidths,
-                              &settingsDraft.groupLabelHeights})
-        for (const auto &entry : *sizes)
-            if (!entry.first.empty())
-                groups.insert(entry.first);
-    for (HWND combo : {groupEdit, appearanceGroup}) {
+    for (HWND combo : {groupEdit}) {
         auto text = ControlText(combo);
         SendMessageW(combo, CB_RESETCONTENT, 0, 0);
         for (const auto &group : groups)
@@ -45,19 +41,6 @@ static void SelectComboText(HWND combo) {
         SendMessageW(combo, CB_GETLBTEXT, row, (LPARAM)text);
         SetWindowTextW(combo, text);
     }
-}
-static void UpdateLabelSize() {
-    wchar_t name[128];
-    GetWindowTextW(appearanceGroup, name, 128);
-    bool previous = fillingSettings;
-    fillingSettings = true;
-    std::wstring group = Trim(name);
-    appearanceName = group;
-    SetWindowTextW(labelSizeEdit, std::to_wstring(settingsDraft.GroupLabelSize(group)).c_str());
-    SetWindowTextW(labelWidthEdit, std::to_wstring(settingsDraft.GroupLabelWidth(group)).c_str());
-    SetWindowTextW(labelHeightEdit, std::to_wstring(settingsDraft.GroupLabelHeight(group)).c_str());
-    labelEditing = false;
-    fillingSettings = previous;
 }
 static void FillSettings() {
     fillingSettings = true;
@@ -116,7 +99,6 @@ static void FillSettings() {
     SendMessageW(foldCheck, BM_SETCHECK, settingsDraft.foldIcons ? BST_CHECKED : BST_UNCHECKED, 0);
     SetWindowTextW(groupEdit, L"");
     groupEditing = false;
-    UpdateLabelSize();
     fillingSettings = false;
 }
 static bool ApplyGroupEdit() {
@@ -220,43 +202,40 @@ static bool ApplyGroupEdit() {
     groupEditing = false;
     return true;
 }
-static bool SaveLabelSize() {
-    wchar_t size[32];
-    GetWindowTextW(labelSizeEdit, size, 32);
-    int points = _wtoi(size);
-    if (points < 8 || points > 32) {
-        MessageBoxW(settingsWindow, L"标签字号请填写 8 到 32（磅）。", L"字号无效", MB_ICONWARNING);
+static void SelectSettingsPage(int page) {
+    if (settingsWindow && page >= 0 && page < SettingsPageCount)
+        PropSheet_SetCurSel(settingsWindow, nullptr, page);
+}
+static void SettingsChanged() {
+    if (!fillingSettings && settingsWindow && settingsPages[0])
+        PropSheet_Changed(settingsWindow, settingsPages[0]);
+}
+static bool ReadNumber(HWND page, int id, unsigned minimum, unsigned maximum, int &value) {
+    BOOL valid = FALSE;
+    UINT number = GetDlgItemInt(page, id, &valid, FALSE);
+    if (!valid || number < minimum || number > maximum) {
+        SelectSettingsPage(page == settingsPages[1] ? 1 : 2);
+        SetFocus(GetDlgItem(page, id));
+        MessageBoxW(settingsWindow, L"请输入说明范围内的整数。", L"数值无效", MB_ICONWARNING);
         return false;
     }
-    wchar_t value[32];
-    GetWindowTextW(labelWidthEdit, value, 32);
-    int width = _wtoi(value);
-    GetWindowTextW(labelHeightEdit, value, 32);
-    int height = _wtoi(value);
-    if (width < 120 || width > 600 || (height != 0 && (height < 32 || height > 160))) {
-        MessageBoxW(settingsWindow, L"标签宽度：120–600；高度：32–160，或填 0 自动。", L"大小无效",
-                    MB_ICONWARNING);
-        return false;
-    }
-    std::wstring group = appearanceName;
-    settingsDraft.groupLabelSizes[group] = points;
-    settingsDraft.groupLabelWidths[group] = width;
-    settingsDraft.groupLabelHeights[group] = height;
-    labelEditing = false;
+    value = (int)number;
     return true;
 }
-
-static void SelectSettingsPage(int page) {
-    if (page < 0 || page >= 3)
-        return;
-    TabCtrl_SetCurSel(settingsTabs, page);
-    for (int n = 0; n < 3; n++)
-        ShowWindow(settingsPages[n], n == page ? SW_SHOW : SW_HIDE);
+static bool ReadCaptureDraft(CaptureTimer::Preferences &value) {
+    wchar_t directory[32768] = {}, format[256] = {};
+    GetDlgItemTextW(settingsPages[2], IDC_CAPTURE_DIRECTORY, directory, 32768);
+    GetDlgItemTextW(settingsPages[2], IDC_CAPTURE_FORMAT, format, 256);
+    value.directory = Trim(directory);
+    value.format = Trim(format);
+    int interval = 10;
+    if (!ReadNumber(settingsPages[2], IDC_CAPTURE_INTERVAL, 1, 1440, interval))
+        return false;
+    value.intervalMinutes = (unsigned)interval;
+    return true;
 }
 static bool ApplySettings(HWND h) {
     if (groupEditing && !ApplyGroupEdit())
-        return false;
-    if (labelEditing && !SaveLabelSize())
         return false;
     int mode = (int)SendMessageW(matchEdit, CB_GETCURSEL, 0, 0);
     settingsDraft.iconMatch = mode == 3   ? L"path-guid"
@@ -264,6 +243,26 @@ static bool ApplySettings(HWND h) {
                               : mode == 2 ? L"path-class-tip"
                                           : L"path-class-id";
     settingsDraft.foldIcons = SendMessageW(foldCheck, BM_GETCHECK, 0, 0) == BST_CHECKED;
+    if (!ReadNumber(settingsPages[1], IDC_PANEL_WIDTH, 340, 600, settingsDraft.panel.width) ||
+        !ReadNumber(settingsPages[1], IDC_PANEL_ICON_SIZE, 20, 44, settingsDraft.panel.iconSize) ||
+        !ReadNumber(settingsPages[1], IDC_PANEL_COLUMNS, 3, 6, settingsDraft.panel.columns))
+        return false;
+    settingsDraft.panel.showNames =
+        IsDlgButtonChecked(settingsPages[1], IDC_PANEL_NAMES) == BST_CHECKED;
+    settingsDraft.panel.showCapture =
+        IsDlgButtonChecked(settingsPages[1], IDC_PANEL_CAPTURE) == BST_CHECKED;
+    CaptureTimer::Preferences capture;
+    if (!ReadCaptureDraft(capture))
+        return false;
+    bool captureChanged = capture.directory != captureDraft.directory ||
+                          capture.format != captureDraft.format ||
+                          capture.intervalMinutes != captureDraft.intervalMinutes;
+    std::wstring error;
+    if (captureChanged && !CaptureTimer::ValidatePreferences(capture, error)) {
+        SelectSettingsPage(2);
+        MessageBoxW(h, error.c_str(), L"截图设置无效", MB_ICONWARNING);
+        return false;
+    }
     settingsDraft.settingsX = settingsConfig.settingsX;
     settingsDraft.settingsY = settingsConfig.settingsY;
     settingsDraft.haveSettingsPosition = settingsConfig.haveSettingsPosition;
@@ -272,25 +271,24 @@ static bool ApplySettings(HWND h) {
         MessageBoxW(h, L"配置保存失败，尚未应用。", L"TrayGroups", MB_ICONERROR);
         return false;
     }
+    // 两份配置分别原子写入；截图配置失败时回滚分组配置，避免部分应用。
+    if (captureChanged && !CaptureTimer::SavePreferences(capture, error)) {
+        if (!settingsConfig.Save(configPath))
+            error += L"\n分组配置回滚失败，请检查目录权限。";
+        MessageBoxW(h, error.c_str(), L"未能应用", MB_ICONERROR);
+        return false;
+    }
+    captureDraft = capture;
     settingsConfig = settingsDraft;
     matchState = settingsMatchState;
     Refresh(true);
     settingsMatchState = matchState;
     FillSettings();
-    SetWindowTextW(h, L"TrayGroups 设置 · 已应用");
+    for (HWND page : settingsPages)
+        PropSheet_UnChanged(h, page);
     return true;
 }
-static INT_PTR CALLBACK SettingsPageProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
-    if (msg == WM_COMMAND || msg == WM_NOTIFY)
-        return SendMessageW(GetParent(h), msg, w, l);
-    if (msg == WM_INITDIALOG) {
-        EnableThemeDialogTexture(h, ETDT_ENABLETAB);
-        UiStyle::Attach(h, 0, -2, IDC_UI_SUBTITLE);
-        return TRUE;
-    }
-    return FALSE;
-}
-static INT_PTR CALLBACK SettingsProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
+static INT_PTR SettingsCommands(HWND h, UINT msg, WPARAM w, LPARAM l) {
     if (msg == WM_COMMAND) {
         int id = LOWORD(w), event = HIWORD(w);
         if (id == IDC_ICON_DETAILS) {
@@ -311,11 +309,11 @@ static INT_PTR CALLBACK SettingsProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             return TRUE;
         }
         if (id == IDC_MANAGE_RULES) {
-            if ((groupEditing && !ApplyGroupEdit()) || (labelEditing && !SaveLabelSize()))
+            if (groupEditing && !ApplyGroupEdit())
                 return TRUE;
             if (TrayInspector::ManageRules(h, settingsDraft, settingsMatchState, ReadTray)) {
                 FillSettings();
-                SetWindowTextW(h, L"TrayGroups 设置 · 规则修改待应用");
+                SettingsChanged();
             }
             return TRUE;
         }
@@ -325,28 +323,6 @@ static INT_PTR CALLBACK SettingsProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
                     SelectComboText(groupEdit);
                 groupEditing = true;
             }
-            return TRUE;
-        }
-        if (id == IDC_APPEARANCE_GROUP && (event == CBN_EDITCHANGE || event == CBN_SELCHANGE)) {
-            if (!fillingSettings) {
-                if (labelEditing && !SaveLabelSize()) {
-                    SetWindowTextW(appearanceGroup, appearanceName.c_str());
-                    return TRUE;
-                }
-                if (event == CBN_SELCHANGE)
-                    SelectComboText(appearanceGroup);
-                UpdateLabelSize();
-            }
-            return TRUE;
-        }
-        if ((id == IDC_LABEL_SIZE || id == IDC_LABEL_WIDTH || id == IDC_LABEL_HEIGHT) &&
-            event == EN_CHANGE) {
-            if (!fillingSettings)
-                labelEditing = true;
-            return TRUE;
-        }
-        if (id == IDC_APPLY || id == IDOK) {
-            ApplySettings(h);
             return TRUE;
         }
         if (id == IDC_UNGROUP) {
@@ -362,17 +338,14 @@ static INT_PTR CALLBACK SettingsProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
             PostMessageW(mainWindow, RestoreAllApp, 0, 0);
             return TRUE;
         }
-        if (id == IDC_CLOSE || id == IDCANCEL) {
-            SendMessageW(h, WM_CLOSE, 0, 0);
+        if (id == IDC_CAPTURE_NOW || id == IDC_CAPTURE_FOLDER) {
+            CaptureTimer::HandleMenu(id == IDC_CAPTURE_NOW ? CaptureTimer::CaptureNowCommand
+                                                           : CaptureTimer::FolderCommand);
             return TRUE;
         }
     }
     if (msg == WM_NOTIFY) {
         NMHDR *n = (NMHDR *)l;
-        if (n->hwndFrom == settingsTabs && n->code == TCN_SELCHANGE) {
-            SelectSettingsPage(TabCtrl_GetCurSel(settingsTabs));
-            return TRUE;
-        }
         if (n->hwndFrom == listWindow && n->code == LVN_ITEMCHANGED && !fillingSettings &&
             !groupEditing) {
             auto change = (NMLISTVIEW *)l;
@@ -386,27 +359,89 @@ static INT_PTR CALLBACK SettingsProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         }
         return TRUE;
     }
-    if (msg == WM_EXITSIZEMOVE) {
-        RememberSettingsPosition(h);
+    return FALSE;
+}
+// 系统属性页先创建全部页面，以便应用时集中验证并提交编辑副本。
+static INT_PTR CALLBACK SettingsPageProc(HWND page, UINT message, WPARAM w, LPARAM l) {
+    if (message == WM_INITDIALOG) {
+        auto *descriptor = (PROPSHEETPAGEW *)l;
+        settingsPages[descriptor->lParam] = page;
+        EnableThemeDialogTexture(page, ETDT_ENABLETAB);
         return TRUE;
     }
-    if (msg == WM_CLOSE) {
-        DestroyWindow(h);
-        return TRUE;
-    }
-    if (msg == WM_DESTROY) {
-        RememberSettingsPosition(h);
-        settingsWindow = nullptr;
-        listWindow = nullptr;
-        if (settingsImages) {
-            ImageList_Destroy(settingsImages);
-            settingsImages = nullptr;
+    if (message == WM_NOTIFY) {
+        auto *header = (NMHDR *)l;
+        if (header->code == PSN_APPLY) {
+            bool success = page != settingsPages[0] || ApplySettings(settingsWindow);
+            SetWindowLongPtrW(page, DWLP_MSGRESULT,
+                              success ? PSNRET_NOERROR : PSNRET_INVALID_NOCHANGEPAGE);
+            return TRUE;
         }
+        if (header->code == PSN_KILLACTIVE) {
+            SetWindowLongPtrW(page, DWLP_MSGRESULT, FALSE);
+            return TRUE;
+        }
+    }
+    if (message == WM_COMMAND) {
+        int event = HIWORD(w), id = LOWORD(w);
+        if (event == EN_CHANGE || event == CBN_EDITCHANGE || event == CBN_SELCHANGE ||
+            (event == BN_CLICKED && (id == IDC_FOLD || id == IDC_PANEL_NAMES ||
+                                     id == IDC_PANEL_CAPTURE || id == IDC_UNGROUP)))
+            SettingsChanged();
+    }
+    if (message == WM_COMMAND || message == WM_NOTIFY)
+        return SettingsCommands(settingsWindow, message, w, l);
+    return FALSE;
+}
+static LRESULT CALLBACK SettingsSheetProc(HWND window, UINT message, WPARAM w, LPARAM l,
+                                          UINT_PTR id, DWORD_PTR) {
+    // 这些页面没有取消确认；关闭与取消均丢弃草稿并立即释放无模式窗口。
+    if (message == WM_CLOSE || (message == WM_COMMAND && LOWORD(w) == IDCANCEL)) {
+        DestroyWindow(window);
+        return 0;
+    }
+    if (message == WM_TIMER && w == 1) {
+        SetDlgItemTextW(settingsPages[2], IDC_CAPTURE_STATUS, CaptureTimer::StatusText().c_str());
+        return 0;
+    }
+    if (message == WM_EXITSIZEMOVE)
+        RememberSettingsPosition(window);
+    if (message == WM_NCDESTROY) {
+        KillTimer(window, 1);
+        RememberSettingsPosition(window);
+        RemoveWindowSubclass(window, SettingsSheetProc, id);
+        auto result = DefSubclassProc(window, message, w, l);
+        settingsWindow = nullptr;
+        settingsTabs = nullptr;
+        for (auto &page : settingsPages)
+            page = nullptr;
+        listWindow = nullptr;
+        if (settingsImages)
+            ImageList_Destroy(settingsImages);
+        settingsImages = nullptr;
         FreeItems(settingsItems);
         LoadSettings();
-        return TRUE;
+        return result;
     }
-    return FALSE;
+    if ((message == WM_COMMAND && LOWORD(w) != IDC_APPLY && LOWORD(w) != IDOK &&
+         LOWORD(w) != IDCANCEL) ||
+        (message == WM_NOTIFY && ((NMHDR *)l)->hwndFrom == listWindow)) {
+        if (SettingsCommands(window, message, w, l))
+            return TRUE;
+    }
+    auto result = DefSubclassProc(window, message, w, l);
+    // 无模式 PropertySheet 在确定/取消后需要宿主销毁，不遗留空白窗口。
+    if (!fillingSettings && (message == WM_COMMAND || message == WM_CLOSE) && IsWindow(window) &&
+        !PropSheet_GetCurrentPageHwnd(window))
+        DestroyWindow(window);
+    return result;
+}
+static int CALLBACK SettingsSheetCallback(HWND window, UINT message, LPARAM) {
+    if (message == PSCB_INITIALIZED) {
+        settingsWindow = window;
+        SetWindowSubclass(window, SettingsSheetProc, 1, 0);
+    }
+    return 0;
 }
 static RECT SettingsRect() {
     RECT desired = {settingsDraft.settingsX, settingsDraft.settingsY,
@@ -422,55 +457,55 @@ static RECT SettingsRect() {
     y = std::max((int)work.top, std::min(y, (int)work.bottom - settingsHeight));
     return RECT{x, y, x + settingsWidth, y + settingsHeight};
 }
-static void ShowSettings() {
+static void ShowSettings(int page) {
     ClosePopup();
     if (settingsWindow && IsWindow(settingsWindow)) {
         ShowWindow(settingsWindow, SW_RESTORE);
+        SelectSettingsPage(page);
         SetForegroundWindow(settingsWindow);
         return;
     }
     settingsDraft = settingsConfig;
     settingsMatchState = matchState;
+    captureDraft = CaptureTimer::GetPreferences();
+    fillingSettings = true;
     HINSTANCE instance = GetModuleHandleW(nullptr);
-    settingsWindow =
-        CreateDialogParamW(instance, MAKEINTRESOURCEW(IDD_SETTINGS), nullptr, SettingsProc, 0);
-    if (!settingsWindow) {
-        LogError(L"设置窗口创建失败：" + Number(GetLastError()));
+    const int templates[] = {IDD_GROUPS, IDD_APPEARANCE, IDD_CAPTURE, IDD_ADVANCED, IDD_ABOUT};
+    PROPSHEETPAGEW pages[SettingsPageCount] = {};
+    for (int n = 0; n < SettingsPageCount; ++n) {
+        pages[n].dwSize = sizeof(pages[n]);
+        pages[n].dwFlags = PSP_PREMATURE;
+        pages[n].hInstance = instance;
+        pages[n].pszTemplate = MAKEINTRESOURCEW(templates[n]);
+        pages[n].pfnDlgProc = SettingsPageProc;
+        pages[n].lParam = n;
+    }
+    if (!appIcon)
+        appIcon = MakeAppIcon();
+    PROPSHEETHEADERW sheet = {};
+    sheet.dwSize = sizeof(sheet);
+    sheet.dwFlags =
+        PSH_MODELESS | PSH_PROPSHEETPAGE | PSH_USECALLBACK | PSH_USEHICON | PSH_NOCONTEXTHELP;
+    sheet.hInstance = instance;
+    sheet.hIcon = appIcon;
+    sheet.pszCaption = L"TrayGroups 设置";
+    sheet.nPages = SettingsPageCount;
+    sheet.nStartPage = std::clamp(page, 0, SettingsPageCount - 1);
+    sheet.ppsp = pages;
+    sheet.pfnCallback = SettingsSheetCallback;
+    auto created = PropertySheetW(&sheet);
+    if (created <= 0) {
+        settingsWindow = nullptr;
+        fillingSettings = false;
+        LogError(L"设置属性页创建失败");
         return;
     }
-    UiStyle::Attach(settingsWindow, IDC_APPLY, IDC_UI_TITLE, IDC_UI_SUBTITLE);
-    settingsTabs = GetDlgItem(settingsWindow, IDC_SETTINGS_TABS);
-    const wchar_t *names[] = {L"分组", L"外观", L"高级"};
-    const int pages[] = {IDD_GROUPS, IDD_APPEARANCE, IDD_ADVANCED};
-    for (int n = 0; n < 3; n++) {
-        TCITEMW tab = {};
-        tab.mask = TCIF_TEXT;
-        tab.pszText = (LPWSTR)names[n];
-        TabCtrl_InsertItem(settingsTabs, n, &tab);
-    }
-    RECT area;
-    GetWindowRect(settingsTabs, &area);
-    MapWindowPoints(nullptr, settingsWindow, (POINT *)&area, 2);
-    TabCtrl_AdjustRect(settingsTabs, FALSE, &area);
-    for (int n = 0; n < 3; n++) {
-        settingsPages[n] = CreateDialogParamW(instance, MAKEINTRESOURCEW(pages[n]), settingsWindow,
-                                              SettingsPageProc, 0);
-        if (!settingsPages[n]) {
-            LogError(L"设置分页创建失败");
-            DestroyWindow(settingsWindow);
-            return;
-        }
-        SetWindowPos(settingsPages[n], HWND_TOP, area.left, area.top, area.right - area.left,
-                     area.bottom - area.top, 0);
-    }
-    auto group = settingsPages[0], appearance = settingsPages[1], advanced = settingsPages[2];
+    settingsWindow = (HWND)created;
+    settingsTabs = PropSheet_GetTabControl(settingsWindow);
+    auto group = settingsPages[0], advanced = settingsPages[3];
     listWindow = GetDlgItem(group, IDC_ICON_LIST);
     groupEdit = GetDlgItem(group, IDC_GROUP);
     scopeEdit = GetDlgItem(group, IDC_SCOPE);
-    appearanceGroup = GetDlgItem(appearance, IDC_APPEARANCE_GROUP);
-    labelSizeEdit = GetDlgItem(appearance, IDC_LABEL_SIZE);
-    labelWidthEdit = GetDlgItem(appearance, IDC_LABEL_WIDTH);
-    labelHeightEdit = GetDlgItem(appearance, IDC_LABEL_HEIGHT);
     matchEdit = GetDlgItem(advanced, IDC_MATCH);
     foldCheck = GetDlgItem(advanced, IDC_FOLD);
     ListView_SetExtendedListViewStyle(listWindow,
@@ -487,10 +522,7 @@ static void ShowSettings() {
     int columnOrder[] = {0, 1, 2, 5, 3, 4};
     ListView_SetColumnOrderArray(listWindow, 6, columnOrder);
     SetWindowTheme(listWindow, L"Explorer", nullptr);
-    UiStyle::StyleChildren(group);
-    UiStyle::StyleChildren(appearance);
-    UiStyle::StyleChildren(advanced);
-    for (HWND combo : {groupEdit, appearanceGroup})
+    for (HWND combo : {groupEdit})
         SendMessageW(combo, CB_LIMITTEXT, 100, 0);
     for (auto text : {L"仅选中的图标（默认）", L"此完整路径的全部图标", L"此程序名的全部图标"})
         SendMessageW(scopeEdit, CB_ADDSTRING, 0, (LPARAM)text);
@@ -499,9 +531,6 @@ static void ShowSettings() {
          {L"路径 + 窗口类别 + 图标编号", L"路径 + 图标编号", L"路径 + 窗口类别 + 提示文字",
           L"路径 + GUID 优先（推荐；无 GUID 时自动回退）"})
         SendMessageW(matchEdit, CB_ADDSTRING, 0, (LPARAM)text);
-    SendMessageW(labelSizeEdit, EM_SETLIMITTEXT, 2, 0);
-    for (HWND edit : {labelWidthEdit, labelHeightEdit})
-        SendMessageW(edit, EM_SETLIMITTEXT, 3, 0);
     if (!appIcon)
         appIcon = MakeAppIcon();
     for (int size : {ICON_BIG, ICON_SMALL})
@@ -514,7 +543,28 @@ static void ShowSettings() {
     SetWindowPos(settingsWindow, nullptr, placement.left, placement.top, 0, 0,
                  SWP_NOSIZE | SWP_NOZORDER);
     FillSettings();
-    SelectSettingsPage(0);
+    fillingSettings = true;
+    SetDlgItemInt(settingsPages[1], IDC_PANEL_WIDTH, settingsDraft.panel.width, FALSE);
+    SetDlgItemInt(settingsPages[1], IDC_PANEL_ICON_SIZE, settingsDraft.panel.iconSize, FALSE);
+    SetDlgItemInt(settingsPages[1], IDC_PANEL_COLUMNS, settingsDraft.panel.columns, FALSE);
+    CheckDlgButton(settingsPages[1], IDC_PANEL_NAMES,
+                   settingsDraft.panel.showNames ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(settingsPages[1], IDC_PANEL_CAPTURE,
+                   settingsDraft.panel.showCapture ? BST_CHECKED : BST_UNCHECKED);
+    SetDlgItemTextW(settingsPages[2], IDC_CAPTURE_DIRECTORY, captureDraft.directory.c_str());
+    SetDlgItemTextW(settingsPages[2], IDC_CAPTURE_FORMAT, captureDraft.format.c_str());
+    SetDlgItemInt(settingsPages[2], IDC_CAPTURE_INTERVAL, captureDraft.intervalMinutes, FALSE);
+    SendDlgItemMessageW(settingsPages[2], IDC_CAPTURE_DIRECTORY, EM_SETLIMITTEXT, 32767, 0);
+    SendDlgItemMessageW(settingsPages[2], IDC_CAPTURE_FORMAT, EM_SETLIMITTEXT, 255, 0);
+    SendDlgItemMessageW(settingsPages[2], IDC_CAPTURE_INTERVAL, EM_SETLIMITTEXT, 4, 0);
+    SetDlgItemTextW(settingsPages[2], IDC_CAPTURE_STATUS, CaptureTimer::StatusText().c_str());
+    SetDlgItemTextW(settingsPages[4], IDC_ABOUT_VERSION,
+                    L"TrayGroups " TRAYGROUPS_WIDEN(TRAYGROUPS_VERSION_TEXT));
+    fillingSettings = false;
+    for (HWND current : settingsPages)
+        PropSheet_UnChanged(settingsWindow, current);
+    SetTimer(settingsWindow, 1, 1000, nullptr);
+    SelectSettingsPage(page);
     ShowWindow(settingsWindow, SW_RESTORE);
     SetForegroundWindow(settingsWindow);
 }

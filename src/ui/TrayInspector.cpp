@@ -13,7 +13,7 @@ namespace TrayInspector {
 namespace {
 INT_PTR CALLBACK DetailsProc(HWND window, UINT message, WPARAM w, LPARAM l) {
     if (message == WM_INITDIALOG) {
-        UiStyle::Attach(window, IDOK, IDC_UI_TITLE, IDC_UI_SUBTITLE);
+        UiStyle::Attach(window);
         SetDlgItemTextW(window, IDC_DETAIL_TEXT, reinterpret_cast<const wchar_t *>(l));
         SendDlgItemMessageW(window, IDC_DETAIL_TEXT, EM_SETSEL, 0, 0);
         SendDlgItemMessageW(window, IDC_DETAIL_TEXT, EM_SETMARGINS, EC_LEFTMARGIN | EC_RIGHTMARGIN,
@@ -75,7 +75,7 @@ void RefreshIcons(HWND window, RuleEditor &editor) {
 INT_PTR CALLBACK RulesProc(HWND window, UINT message, WPARAM w, LPARAM l) {
     auto *editor = reinterpret_cast<RuleEditor *>(GetWindowLongPtrW(window, DWLP_USER));
     if (message == WM_INITDIALOG) {
-        UiStyle::Attach(window, IDC_RULE_REBIND, IDC_UI_TITLE, IDC_UI_SUBTITLE);
+        UiStyle::Attach(window);
         editor = reinterpret_cast<RuleEditor *>(l);
         SetWindowLongPtrW(window, DWLP_USER, l);
         HWND list = GetDlgItem(window, IDC_RULE_LIST);

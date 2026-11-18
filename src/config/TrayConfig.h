@@ -8,11 +8,10 @@ namespace TrayConfig {
 int LabelSize(int value);
 bool ValidMatch(const std::wstring &value);
 
-// 紧凑面板参数采用 96 DPI 逻辑像素，渲染时统一缩放。
+// 系统图标视图尺寸采用 96 DPI 逻辑像素；字体和组标题遵循系统主题。
 struct Panel {
-    int width = 420, radius = 16, iconSize = 28, columns = 4, labelSize = 12, spacing = 12;
+    int width = 420, iconSize = 28, columns = 4;
     bool showNames = true, showCapture = true;
-    std::wstring accent = L"#31a18b";
     std::vector<std::wstring> groupOrder = {L"效率工具", L"影音娱乐", L"连接服务"};
 };
 

@@ -13,6 +13,14 @@ void Initialize(HWND owner, HINSTANCE instance, const std::wstring &directory);
 UINT CompletionMessage();
 UINT TimerId();
 bool IsBusy();
+// 属性页编辑使用值副本；校验不写盘，应用成功后重新计算下次截图时间。
+struct Preferences {
+    std::wstring directory, format;
+    unsigned intervalMinutes = 10;
+};
+Preferences GetPreferences();
+bool ValidatePreferences(const Preferences &value, std::wstring &error);
+bool SavePreferences(const Preferences &value, std::wstring &error);
 void OnTimer();
 // 锁屏跳过截图，解锁后按所选间隔重新对齐，不补拍错过的时间点。
 void OnSessionChange(WPARAM event);

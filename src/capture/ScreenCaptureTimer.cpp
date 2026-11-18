@@ -743,7 +743,7 @@ static void ShowSettings() {
                    22, 0);
     CaptureControl(settingsWindow, L"BUTTON", L"资源占用", BS_PUSHBUTTON, 24, 306, 110, 32, 2);
     CaptureControl(settingsWindow, L"BUTTON", L"保存设置", BS_DEFPUSHBUTTON, 516, 306, 120, 32, 1);
-    UiStyle::Attach(settingsWindow, 1, IDC_UI_TITLE, IDC_UI_SUBTITLE);
+    UiStyle::Attach(settingsWindow);
     ShowWindow(settingsWindow, SW_RESTORE);
     SetWindowPos(settingsWindow, HWND_TOP, 40, 40, 0, 0, SWP_SHOWWINDOW | SWP_NOSIZE);
     SetForegroundWindow(settingsWindow);
@@ -994,6 +994,35 @@ UINT TimerId() {
 }
 bool IsBusy() {
     return busy.load();
+}
+Preferences GetPreferences() {
+    return {settings.directory, settings.format, settings.intervalMinutes};
+}
+bool ValidatePreferences(const Preferences &value, std::wstring &error) {
+    error.clear();
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+    if (!ValidInterval(value.intervalMinutes))
+        error = L"截图间隔请输入 1 到 1440 分钟。";
+    else if (value.directory.size() < 3 ||
+             !(value.directory[1] == L':' ||
+               (value.directory[0] == L'\\' && value.directory[1] == L'\\')) ||
+             FormatName(value.format, now).empty())
+        error = L"请输入完整保存路径，以及 HH-mm、HH-mm-ss 等文件名格式。";
+    return error.empty();
+}
+bool SavePreferences(const Preferences &value, std::wstring &error) {
+    if (!ValidatePreferences(value, error))
+        return false;
+    Settings changed{value.directory, value.format, value.intervalMinutes};
+    if (!initialized || !MakeDirectories(changed.directory) || !Save(changed)) {
+        error = L"截图目录或设置无法保存。";
+        return false;
+    }
+    settings = std::move(changed);
+    previousTime = Now();
+    nextTime = Next(previousTime);
+    return true;
 }
 void OnTimer() {
     ULONGLONG now = Now();
