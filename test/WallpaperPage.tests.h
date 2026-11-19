@@ -119,12 +119,11 @@ static bool WallpaperPageButtons(std::wstring &report) {
               L"identity");
         SendDlgItemMessageW(page, IDC_WALL_POSITION, CB_SETCURSEL, DWPOS_SPAN, 0);
         SendMessageW(page, WM_COMMAND, MAKEWPARAM(IDC_WALL_POSITION, CBN_SELCHANGE), 0);
-        check(!WallpaperPage::Validate(page, error) && WallpaperTest::writes.empty(),
+        check(!WallpaperPage::Apply(page, error) && WallpaperTest::writes.empty(),
               L"independent wallpaper edits cannot silently use the global span mode");
         SendDlgItemMessageW(page, IDC_WALL_POSITION, CB_SETCURSEL, DWPOS_FIT, 0);
         SendMessageW(page, WM_COMMAND, MAKEWPARAM(IDC_WALL_POSITION, CBN_SELCHANGE), 0);
-        check(WallpaperPage::Validate(page, error) && WallpaperPage::Apply(page, error) &&
-                  WallpaperTest::writes.size() == 1 &&
+        check(WallpaperPage::Apply(page, error) && WallpaperTest::writes.size() == 1 &&
                   WallpaperTest::writes[0].first ==
                       WallpaperTest::snapshot.monitors[0].devicePath &&
                   WallpaperTest::snapshot.monitors[1].image == first &&
@@ -133,6 +132,8 @@ static bool WallpaperPageButtons(std::wstring &report) {
               L"global fit mode");
         select(1);
         SetDlgItemTextW(page, IDC_WALL_IMAGE, second.c_str());
+        auto reads = WallpaperTest::reads;
+        auto images = settingsImages;
         SendMessageW(GetDlgItem(settingsWindow, IDC_APPLY), BM_CLICK, 0, 0);
         check(WallpaperTest::writes.size() == 2 &&
                   WallpaperTest::writes.back().first ==
@@ -140,6 +141,8 @@ static bool WallpaperPageButtons(std::wstring &report) {
                   WallpaperTest::snapshot.monitors[0].image == second,
               L"standard property-sheet Apply commits the second monitor without rewriting the "
               L"first");
+        check(WallpaperTest::reads == reads + 1 && settingsImages == images,
+              L"wallpaper-only Apply reads monitor topology once and keeps the tray image list");
         select(0);
         DWORD baseline = GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS);
         for (int repeat = 0; repeat < 8; ++repeat) {
@@ -149,12 +152,12 @@ static bool WallpaperPageButtons(std::wstring &report) {
         check(GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS) == baseline,
               L"repeated wallpaper selection releases thumbnail and Static bitmap copies");
         SetDlgItemTextW(page, IDC_WALL_IMAGE, L"C:\\missing-wallpaper.bmp");
-        check(!WallpaperPage::Validate(page, error),
+        check(!WallpaperPage::Apply(page, error),
               L"missing image is rejected without dropping the draft");
         SetDlgItemTextW(page, IDC_WALL_IMAGE, second.c_str());
         WallpaperTest::snapshot.monitors[0].identity += L"replacement";
         SetDlgItemTextW(page, IDC_WALL_IMAGE, first.c_str());
-        check(!WallpaperPage::Validate(page, error),
+        check(!WallpaperPage::Apply(page, error),
               L"hotplug replacement on an old device path is rejected before apply");
         // 丢弃上一个设备的草稿后恢复真实只读列表，后续按钮测试不触及系统壁纸。
         WallpaperPage::Refresh(page);

@@ -6,8 +6,9 @@ namespace WallpaperTest {
 inline Wallpaper::Snapshot snapshot;
 inline std::vector<std::pair<std::wstring, std::wstring>> writes;
 inline std::vector<DESKTOP_WALLPAPER_POSITION> positions;
-inline int rejectWrite = 0, calls = 0;
+inline int rejectWrite = 0, calls = 0, reads = 0;
 inline bool Read(Wallpaper::Snapshot &value, std::wstring &error) {
+    ++reads;
     error.clear();
     value = snapshot;
     return true;
@@ -30,7 +31,7 @@ inline HRESULT SetPosition(DESKTOP_WALLPAPER_POSITION position) {
 inline void Reset() {
     writes.clear();
     positions.clear();
-    rejectWrite = calls = 0;
+    rejectWrite = calls = reads = 0;
 }
 struct Backend {
     Wallpaper::TestHooks previous = Wallpaper::testHooks;

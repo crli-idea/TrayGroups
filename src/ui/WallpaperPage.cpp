@@ -21,6 +21,7 @@ struct Row {
 };
 struct State {
     std::wstring directory;
+    std::wstring previewPath;
     std::vector<Row> rows;
     int selected = -1;
     bool filling = false, positionEdited = false;
@@ -52,6 +53,9 @@ std::wstring DisplayName(const Wallpaper::Monitor &m, int number) {
            (m.connected ? L"" : L"（未连接）");
 }
 void Preview(HWND page, State &state, const std::wstring &path) {
+    if (state.preview && path == state.previewPath)
+        return;
+    state.previewPath = path;
     auto previous =
         (HBITMAP)SendDlgItemMessageW(page, IDC_WALL_PREVIEW, STM_SETIMAGE, IMAGE_BITMAP, 0);
     // Static 可能为含 alpha 的 DIB 创建副本，返回句柄也必须释放。
@@ -302,23 +306,6 @@ void Initialize(HWND page, const std::wstring &directory) {
         SendDlgItemMessageW(page, IDC_WALL_POSITION, CB_ADDSTRING, 0, (LPARAM)text);
     SendDlgItemMessageW(page, IDC_WALL_IMAGE, EM_SETLIMITTEXT, 32767, 0);
     Refresh(page);
-}
-bool Validate(HWND page, std::wstring &error) {
-    auto state = Get(page);
-    if (!state)
-        return true;
-    auto changes = Changes(*state);
-    if (!changes.empty() && state->position == DWPOS_SPAN) {
-        error = L"跨屏模式会把图片铺到所有显示器，独立壁纸请选择填充、适应等模式。";
-        return false;
-    }
-    if (changes.empty() && !state->positionEdited)
-        return true;
-    if (state->position < DWPOS_CENTER || state->position > DWPOS_SPAN) {
-        error = L"请选择有效的壁纸显示方式。";
-        return false;
-    }
-    return Wallpaper::Validate(changes, error);
 }
 bool Apply(HWND page, std::wstring &error) {
     auto state = Get(page);

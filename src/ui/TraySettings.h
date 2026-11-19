@@ -235,7 +235,7 @@ static bool ReadCaptureDraft(CaptureTimer::Preferences &value) {
     value.intervalMinutes = (unsigned)interval;
     return true;
 }
-static bool ApplySettings(HWND h) {
+static bool ApplySettings(HWND h, bool closing) {
     if (groupEditing && !ApplyGroupEdit())
         return false;
     int mode = (int)SendMessageW(matchEdit, CB_GETCURSEL, 0, 0);
@@ -264,28 +264,36 @@ static bool ApplySettings(HWND h) {
         MessageBoxW(h, error.c_str(), L"截图设置无效", MB_ICONWARNING);
         return false;
     }
-    if (!WallpaperPage::Validate(settingsPages[4], error)) {
-        SelectSettingsPage(4);
-        MessageBoxW(h, error.c_str(), L"壁纸设置无效", MB_ICONWARNING);
-        return false;
-    }
+    bool groupingChanged = settingsDraft.iconMatch != settingsConfig.iconMatch ||
+                           settingsDraft.foldIcons != settingsConfig.foldIcons ||
+                           settingsDraft.assignments != settingsConfig.assignments ||
+                           settingsDraft.pathAssignments != settingsConfig.pathAssignments ||
+                           settingsDraft.programAssignments != settingsConfig.programAssignments;
+    bool bindingsChanged = settingsMatchState.ruleBindings != matchState.ruleBindings ||
+                           settingsMatchState.pendingRules != matchState.pendingRules;
+    const auto &panel = settingsDraft.panel;
+    const auto &oldPanel = settingsConfig.panel;
+    bool configChanged = groupingChanged || panel.width != oldPanel.width ||
+                         panel.iconSize != oldPanel.iconSize || panel.columns != oldPanel.columns ||
+                         panel.showNames != oldPanel.showNames ||
+                         panel.showCapture != oldPanel.showCapture;
     settingsDraft.settingsX = settingsConfig.settingsX;
     settingsDraft.settingsY = settingsConfig.settingsY;
     settingsDraft.haveSettingsPosition = settingsConfig.haveSettingsPosition;
     settingsDraft.debugLogging = DebugLog::enabled.load();
-    if (!settingsDraft.Save(configPath)) {
+    if (configChanged && !settingsDraft.Save(configPath)) {
         MessageBoxW(h, L"配置保存失败，尚未应用。", L"TrayGroups", MB_ICONERROR);
         return false;
     }
     // 两份配置分别原子写入；截图配置失败时回滚分组配置，避免部分应用。
     if (captureChanged && !CaptureTimer::SavePreferences(capture, error)) {
-        if (!settingsConfig.Save(configPath))
+        if (configChanged && !settingsConfig.Save(configPath))
             error += L"\n分组配置回滚失败，请检查目录权限。";
         MessageBoxW(h, error.c_str(), L"未能应用", MB_ICONERROR);
         return false;
     }
     if (!WallpaperPage::Apply(settingsPages[4], error)) {
-        if (!settingsConfig.Save(configPath))
+        if (configChanged && !settingsConfig.Save(configPath))
             error += L"\n分组配置回滚失败。";
         if (captureChanged) {
             std::wstring captureError;
@@ -297,11 +305,15 @@ static bool ApplySettings(HWND h) {
         return false;
     }
     captureDraft = capture;
-    settingsConfig = settingsDraft;
-    matchState = settingsMatchState;
-    Refresh(true);
-    settingsMatchState = matchState;
-    FillSettings();
+    if (configChanged)
+        settingsConfig = settingsDraft;
+    if (groupingChanged || bindingsChanged) {
+        matchState = settingsMatchState;
+        Refresh(true);
+        settingsMatchState = matchState;
+        if (!closing)
+            FillSettings();
+    }
     for (HWND page : settingsPages)
         PropSheet_UnChanged(h, page);
     return true;
@@ -395,7 +407,9 @@ static INT_PTR CALLBACK SettingsPageProc(HWND page, UINT message, WPARAM w, LPAR
         if (page == settingsPages[4] && header->code == PSN_SETACTIVE)
             WallpaperPage::Initialize(page, baseDir);
         if (header->code == PSN_APPLY) {
-            bool success = page != settingsPages[0] || ApplySettings(settingsWindow);
+            auto *notification = reinterpret_cast<const PSHNOTIFY *>(l);
+            bool success = page != settingsPages[0] ||
+                           ApplySettings(settingsWindow, notification->lParam != 0);
             SetWindowLongPtrW(page, DWLP_MSGRESULT,
                               success ? PSNRET_NOERROR : PSNRET_INVALID_NOCHANGEPAGE);
             return TRUE;

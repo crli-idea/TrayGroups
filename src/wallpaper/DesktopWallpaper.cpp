@@ -399,16 +399,6 @@ bool Read(Snapshot &snapshot, std::wstring &error) {
         snapshot.slideshow = (status & DSS_SLIDESHOW) != 0;
     return true;
 }
-bool Validate(const std::vector<Change> &changes, std::wstring &error) {
-    error.clear();
-    Snapshot current;
-    if (!Read(current, error))
-        return false;
-    Service service;
-    if (!service.Open(error))
-        return false;
-    return MatchChanges(current, changes, error);
-}
 bool Apply(const std::vector<Change> &changes, DESKTOP_WALLPAPER_POSITION position,
            bool changePosition, std::wstring &error, const std::wstring &saveDirectory) {
     error.clear();

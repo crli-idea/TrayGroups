@@ -3,7 +3,6 @@
 
 namespace WallpaperPage {
 void Initialize(HWND page, const std::wstring &directory);
-bool Validate(HWND page, std::wstring &error);
 bool Apply(HWND page, std::wstring &error);
 // 测试与热插拔使用同一条刷新路径；刷新保留仍连接且身份相同的未应用图片。
 void Refresh(HWND page);

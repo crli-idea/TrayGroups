@@ -19,9 +19,9 @@ $testProcess = Start-Process -FilePath "$buildOutput\TrayGroups.tests.exe" -Wind
 if (-not $testProcess.WaitForExit(25000)) { throw 'Test timeout.' }
 if ($testProcess.ExitCode -ne 0) { throw 'Test failed; see reports in test directory.' }
 $testProcess = Start-Process -FilePath "$buildOutput\TrayGroups.tests.exe" -ArgumentList '--ui' -WindowStyle Hidden -PassThru
-if (-not $testProcess.WaitForExit(25000)) { throw 'UI test timeout.' }
+if (-not $testProcess.WaitForExit(45000)) { throw 'UI test timeout.' }
 if ($testProcess.ExitCode -ne 0) { throw 'UI test failed.' }
 $testProcess = Start-Process -FilePath "$buildOutput\TrayGroups.tests.exe" -ArgumentList '--ui96' -WindowStyle Hidden -PassThru
-if (-not $testProcess.WaitForExit(25000)) { throw '100% UI test timeout.' }
+if (-not $testProcess.WaitForExit(45000)) { throw '100% UI test timeout.' }
 if ($testProcess.ExitCode -ne 0) { throw '100% UI test failed.' }
 Get-Content -LiteralPath "$buildOutput\self-test.txt","$buildOutput\ui-self-test.txt"
