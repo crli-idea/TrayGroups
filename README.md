@@ -4,6 +4,8 @@
 
 SSH 地址：`git@github.com:crli-idea/TrayGroups.git`
 
+1.7.0 在右键 T 菜单新增「重新应用壁纸」。Windows 改掉桌面背景后，可一键恢复已保存的各屏壁纸。
+
 1.6.0 新增每台显示器独立设置壁纸：右键 T →“显示器壁纸”，或设置 →“壁纸”。
 
 1.5.1 修复设置窗口标题栏 X 和 Alt+F4 的关闭处理，关闭后丢弃未应用修改并释放窗口资源，托盘程序继续运行；“恢复全部图标”同时同步设置页的折叠开关。首次点击“打开保存目录”会先创建目标目录。设置页全部 13 个可见按钮/复选框、T 面板的 3 个按钮、详情/规则管理子窗口和五个页面的关闭入口均纳入本地交互回归。
@@ -185,7 +187,9 @@ ZIP 附带两张原图：`resources/wallpaper_4717x2984.jpg`（横图）和 `res
 
 在壁纸页选屏幕后点“默认图片”会读取对应项，点击“应用”后生效。可在 INI 中为其他分辨率增添路径；相对路径始终以 EXE 所在目录为基准，不受启动时工作目录影响。没有匹配的分辨率时会提示，并保留当前选择。整包解压和移动时请保留 `resources` 文件夹；升级时保留自己修改的 `wallpapers.ini`。
 
-壁纸由 Windows 自己保存，不需要 TrayGroups 开机重放，不增加托盘图标或定时线程。你自行浏览选择的图片保留原路径，不额外复制；移动/删除原图后需重新选择。只在打开该页时读取显示信息和生成有限尺寸缩略图，关闭后释放图片句柄。壁纸模块在 `src/wallpaper/`，页面在 `src/ui/WallpaperPage.cpp`。
+在壁纸页点击「应用」或「确定」后，TrayGroups 把本次应用的图片和显示方式保存到程序旁的 `wallpaper-selection.ini`。右键 T →「重新应用壁纸」会按显示器身份恢复已保存的图片。尚无个人记录的屏幕使用 `wallpapers.ini` 中匹配当前分辨率的默认图片。升级前选过的自定义图片可以在新版壁纸页重新选一次并应用。升级时保留 `wallpaper-selection.ini`。
+
+Windows 保存实际桌面背景。你自行浏览选择的图片保留原路径，不额外复制；移动/删除原图后需重新选择。只在打开该页时读取显示信息和生成有限尺寸缩略图，关闭后释放图片句柄。壁纸模块在 `src/wallpaper/`，页面在 `src/ui/WallpaperPage.cpp`。
 
 ## 定时截图
 
@@ -197,15 +201,15 @@ ZIP 附带两张原图：`resources/wallpaper_4717x2984.jpg`（横图）和 `res
 
 运行 `build.ps1` 构建 TrayGroups 单一程序。截图源码在 `src/capture/`，截图测试在 `test/capture/`，所有新编译产物写入 `test/build/`。运行 `test/run-all.ps1` 执行全部测试。
 
-运行 `.\package.ps1 -Version v1.6.0` 生成 `.\TrayGroups-v1.6.0-windows-x64.zip`。便携包包含 `TrayGroups.exe`、干净的默认 `groups.ini`、`wallpapers.ini`、README 和两张 `resources/` 壁纸。INI 模板位于 `defaults/`，不包含个人分组或恢复记录。`config.json` 首次启动时生成。升级时保留自己已有的配置和恢复文件。打包脚本检查文件是否齐全，并校验版本标签与 EXE 版本一致。
+运行 `.\package.ps1 -Version v1.7.0` 生成 `.\TrayGroups-v1.7.0-windows-x64.zip`。便携包包含 `TrayGroups.exe`、干净的默认 `groups.ini`、`wallpapers.ini`、README 和两张 `resources/` 壁纸。INI 模板位于 `defaults/`，不包含个人分组或恢复记录。`config.json` 首次启动时生成。升级时保留自己已有的配置和恢复文件。打包脚本检查文件是否齐全，并校验版本标签与 EXE 版本一致。
 
 每次推送到 `main` 都会通过 GitHub Actions 自动构建、测试并打包，在对应运行页面的 Artifacts 中提供 Windows 便携包；也支持在 Actions 页面手动运行。推送 `v*` 标签时会额外自动创建 Release 并上传便携包。Release 需要仓库允许 Actions 的 `GITHUB_TOKEN` 写入内容。
 
-发布约定：每次完成 bug 修复或新增功能，都必须递增版本号、验证后提交，并为该提交创建及推送 `v版本号` 标签，触发自动构建和 Release。bug 修复递增补丁版本（例如 `v1.1.2`），新增功能递增次版本（例如 `v1.6.0`）；修改 `src/app/AppVersion.h` 中的数字与文本版本即可同步 EXE 资源、启动日志和托盘提示。标签发布后不覆盖或复用，后续修复使用新版本。仅推送 `main` 不算完成上述发布流程。
+发布约定：每次完成 bug 修复或新增功能，都必须递增版本号、验证后提交，并为该提交创建及推送 `v版本号` 标签，触发自动构建和 Release。bug 修复递增补丁版本（例如 `v1.1.2`），新增功能递增次版本（例如 `v1.7.0`）；修改 `src/app/AppVersion.h` 中的数字与文本版本即可同步 EXE 资源、启动日志和托盘提示。标签发布后不覆盖或复用，后续修复使用新版本。仅推送 `main` 不算完成上述发布流程。
 
 每次版本发布前，必须在本地 Windows 上以发布模式运行 `.\build.ps1`，再运行 `.\package.ps1 -Version v版本号`，生成 `.\TrayGroups-v版本号-windows-x64.zip`，方便本地自测，直接在项目根目录查找。ZIP 必须包含对应版本的 `TrayGroups.exe`、默认 `groups.ini`、`wallpapers.ini`、README 和两张带原图分辨率的壁纸；生成后校验包内容与 EXE 版本，并在发布说明中给出本地 ZIP 路径。更新版本号或包内文件后，重新生成本地 ZIP。
 
-例如本次版本：提交后执行 `git tag -a v1.6.0 -m "TrayGroups v1.6.0"`，再执行 `git push origin main v1.6.0`，最后确认 Actions 成功且 Release 的便携包可下载。
+例如本次版本：提交后执行 `git tag -a v1.7.0 -m "TrayGroups v1.7.0"`，再执行 `git push origin main v1.7.0`，最后确认 Actions 成功且 Release 的便携包可下载。
 
 ## 本地调试日志
 

@@ -675,6 +675,7 @@ static void RestoreAllOwnedIcons() {
         FillSettings();
     }
 }
+static constexpr UINT ReapplyWallpaperCommand = 11;
 static void RootMenu() {
     DebugLog::Write(L"MENU open");
     ClosePopup();
@@ -683,6 +684,7 @@ static void RootMenu() {
     AppendMenuW(menu, MF_STRING, 2, L"资源占用");
     CaptureTimer::AddMenu(menu);
     AppendMenuW(menu, MF_STRING, 10, L"显示器壁纸…");
+    AppendMenuW(menu, MF_STRING, ReapplyWallpaperCommand, L"重新应用壁纸");
     AppendMenuW(menu, MF_STRING, 4, L"重新加载配置并刷新");
     AppendMenuW(menu, MF_STRING, 7, L"编辑 groups.ini 配置文件");
     AppendMenuW(menu, MF_STRING, 8, L"打开本地调试日志");
@@ -721,6 +723,10 @@ static void RootMenu() {
     }
     if (id == 10) {
         ShowSettings(4);
+        return;
+    }
+    if (id == ReapplyWallpaperCommand) {
+        PostMessageW(mainWindow, WM_COMMAND, ReapplyWallpaperCommand, 0);
         return;
     }
     if (CaptureTimer::HandleMenu(id))
@@ -838,6 +844,16 @@ static LRESULT CALLBACK MainProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
     }
     if (msg == WM_COMMAND && LOWORD(w) == CaptureTimer::SettingsCommand) {
         ShowSettings(2);
+        return 0;
+    }
+    if (msg == WM_COMMAND && LOWORD(w) == ReapplyWallpaperCommand) {
+        std::wstring error;
+        if (Wallpaper::Reapply(baseDir, error)) {
+            WallpaperPage::Refresh(settingsPages[4]);
+        } else {
+            LogError(error);
+            MessageBoxW(h, error.c_str(), L"重新应用壁纸", MB_ICONWARNING);
+        }
         return 0;
     }
     if (msg == WM_COMMAND && CaptureTimer::HandleMenu(LOWORD(w)))

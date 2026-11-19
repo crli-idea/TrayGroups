@@ -24,7 +24,8 @@ bool Read(Snapshot &snapshot, std::wstring &error);
 // 在调用系统前重新验证设备路径、硬件身份和图片；不以显示编号重新绑定。
 bool Validate(const std::vector<Change> &changes, std::wstring &error);
 bool Apply(const std::vector<Change> &changes, DESKTOP_WALLPAPER_POSITION position,
-           bool changePosition, std::wstring &error);
+           bool changePosition, std::wstring &error, const std::wstring &saveDirectory = L"");
+bool Reapply(const std::wstring &directory, std::wstring &error);
 std::wstring Label(const Monitor &monitor);
 // defaults/wallpapers.ini 打包为程序旁 wallpapers.ini；相对路径以程序目录为基准。
 std::wstring DefaultImage(const std::wstring &directory, int width, int height);

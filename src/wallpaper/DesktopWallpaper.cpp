@@ -7,6 +7,7 @@
 #include <setupapi.h>
 #include <algorithm>
 #include <cwctype>
+#include <map>
 
 namespace Wallpaper {
 #ifdef NATIVE_TEST_BUILD
@@ -75,6 +76,58 @@ std::wstring Escape(const std::wstring &value) {
             result += c;
     }
     return result;
+}
+
+using Entries = std::map<std::wstring, std::wstring>;
+Entries ReadSection(const std::wstring &text, const std::wstring &section) {
+    Entries entries;
+    bool active = false;
+    for (size_t start = 0; start < text.size();) {
+        size_t end = text.find(L'\n', start);
+        if (end == std::wstring::npos)
+            end = text.size();
+        auto line = Trim(text.substr(start, end - start));
+        start = end + 1;
+        if (!line.empty() && line.front() == 0xfeff)
+            line.erase(0, 1);
+        if (line.empty() || line.front() == L';' || line.front() == L'#')
+            continue;
+        if (line.front() == L'[' && line.back() == L']') {
+            active = Lower(line) == section;
+            continue;
+        }
+        size_t equals = line.find(L'=');
+        if (active && equals != std::wstring::npos)
+            entries[Lower(Trim(line.substr(0, equals)))] = Trim(line.substr(equals + 1));
+    }
+    return entries;
+}
+std::wstring ProfilePath(const std::wstring &directory) {
+    return directory + L"\\wallpaper-selection.ini";
+}
+std::wstring PortablePath(const std::wstring &directory, const std::wstring &path) {
+    std::wstring prefix = directory + L"\\";
+    if (path.size() > prefix.size() && _wcsnicmp(path.c_str(), prefix.c_str(), prefix.size()) == 0)
+        return path.substr(prefix.size());
+    return path;
+}
+std::wstring ResolveImage(const std::wstring &directory, std::wstring value) {
+    if (value.empty())
+        return L"";
+    bool absolute =
+        value.size() > 2 && ((value[1] == L':' && (value[2] == L'\\' || value[2] == L'/')) ||
+                             (value[0] == L'\\' && value[1] == L'\\'));
+    if (!absolute)
+        value = directory + L"\\" + value;
+    DWORD length = GetFullPathNameW(value.c_str(), 0, nullptr, nullptr);
+    if (!length)
+        return L"";
+    std::wstring resolved(length, L'\0');
+    DWORD written = GetFullPathNameW(value.c_str(), length, resolved.data(), nullptr);
+    if (!written || written >= length)
+        return L"";
+    resolved.resize(written);
+    return resolved;
 }
 void ReadEdid(Monitor &monitor) {
     const GUID monitorClass = {
@@ -282,41 +335,10 @@ std::wstring Label(const Monitor &m) {
            (m.primary ? L"（主屏）" : L"");
 }
 std::wstring DefaultImage(const std::wstring &directory, int width, int height) {
-    auto text = TraySupport::ReadText(directory + L"\\wallpapers.ini");
-    std::wstring section, key = std::to_wstring(width) + L"x" + std::to_wstring(height), value;
-    for (size_t start = 0; start < text.size();) {
-        size_t end = text.find(L'\n', start);
-        if (end == std::wstring::npos)
-            end = text.size();
-        auto line = Trim(text.substr(start, end - start));
-        start = end + 1;
-        if (line.empty() || line[0] == L';' || line[0] == L'#')
-            continue;
-        if (line.front() == L'[' && line.back() == L']') {
-            section = Lower(line);
-            continue;
-        }
-        size_t equals = line.find(L'=');
-        if (section == L"[byresolution]" && equals != std::wstring::npos &&
-            Lower(Trim(line.substr(0, equals))) == key)
-            value = Trim(line.substr(equals + 1));
-    }
-    if (value.empty())
-        return L"";
-    bool absolute =
-        value.size() > 2 && ((value[1] == L':' && (value[2] == L'\\' || value[2] == L'/')) ||
-                             (value[0] == L'\\' && value[1] == L'\\'));
-    if (!absolute)
-        value = directory + L"\\" + value;
-    DWORD length = GetFullPathNameW(value.c_str(), 0, nullptr, nullptr);
-    if (!length)
-        return L"";
-    std::wstring resolved(length, L'\0');
-    DWORD written = GetFullPathNameW(value.c_str(), length, resolved.data(), nullptr);
-    if (!written || written >= length)
-        return L"";
-    resolved.resize(written);
-    return resolved;
+    auto defaults =
+        ReadSection(TraySupport::ReadText(directory + L"\\wallpapers.ini"), L"[byresolution]");
+    return ResolveImage(directory,
+                        defaults[std::to_wstring(width) + L"x" + std::to_wstring(height)]);
 }
 bool Read(Snapshot &snapshot, std::wstring &error) {
 #ifdef NATIVE_TEST_BUILD
@@ -388,7 +410,7 @@ bool Validate(const std::vector<Change> &changes, std::wstring &error) {
     return MatchChanges(current, changes, error);
 }
 bool Apply(const std::vector<Change> &changes, DESKTOP_WALLPAPER_POSITION position,
-           bool changePosition, std::wstring &error) {
+           bool changePosition, std::wstring &error, const std::wstring &saveDirectory) {
     error.clear();
     if (changes.empty() && !changePosition)
         return true;
@@ -402,6 +424,28 @@ bool Apply(const std::vector<Change> &changes, DESKTOP_WALLPAPER_POSITION positi
         error = L"壁纸显示方式无效。";
         return false;
     }
+    auto appliedPosition = changePosition ? position : current.position;
+    if (!changes.empty() && appliedPosition == DWPOS_SPAN) {
+        error = L"请先选择填充、适应等显示方式，再应用独立壁纸。";
+        return false;
+    }
+    std::wstring profile, temporary;
+    if (!saveDirectory.empty()) {
+        profile = ProfilePath(saveDirectory);
+        auto images = ReadSection(TraySupport::ReadText(profile), L"[monitors]");
+        for (const auto &change : changes)
+            images[Escape(change.monitor.identity)] = PortablePath(saveDirectory, change.image);
+        std::wstring text =
+            L"[Settings]\nPosition=" + std::to_wstring(appliedPosition) + L"\n\n[Monitors]\n";
+        for (const auto &[identity, image] : images)
+            text += identity + L"=" + image + L"\n";
+        temporary = profile + L".tmp";
+        if (!TraySupport::WriteText(temporary, text)) {
+            DeleteFileW(temporary.c_str());
+            error = L"无法在程序目录保存壁纸配置。";
+            return false;
+        }
+    }
     // Windows 的显示方式是全局设置；先记住原值，失败时尝试撤销本次已完成的更改。
     size_t applied = 0;
     HRESULT hr = S_OK;
@@ -409,7 +453,12 @@ bool Apply(const std::vector<Change> &changes, DESKTOP_WALLPAPER_POSITION positi
         hr = service.SetPosition(position);
     for (; SUCCEEDED(hr) && applied < changes.size(); ++applied)
         hr = service.SetImage(changes[applied].monitor.devicePath, changes[applied].image);
-    if (FAILED(hr)) {
+    bool saveFailed = SUCCEEDED(hr) && !temporary.empty() &&
+                      !MoveFileExW(temporary.c_str(), profile.c_str(),
+                                   MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH);
+    if (FAILED(hr) || saveFailed) {
+        if (!temporary.empty())
+            DeleteFileW(temporary.c_str());
         bool restored = true;
         for (size_t n = 0; n < applied; ++n) {
             auto old = std::find_if(
@@ -422,10 +471,43 @@ bool Apply(const std::vector<Change> &changes, DESKTOP_WALLPAPER_POSITION positi
             restored &= SUCCEEDED(service.SetPosition(current.position));
         wchar_t code[32];
         swprintf_s(code, L"0x%08lx", (unsigned long)hr);
-        error = L"Windows 拒绝设置壁纸：" + std::wstring(code) +
-                (restored ? L"；已撤销本次更改。" : L"；部分更改无法撤销，请刷新检查。");
+        error = saveFailed ? L"无法保存壁纸配置。" : L"Windows 拒绝设置壁纸：" + std::wstring(code);
+        error += restored ? L" 已撤销本次更改。" : L" 部分更改无法撤销，请刷新检查。";
         return false;
     }
     return true;
+}
+
+bool Reapply(const std::wstring &directory, std::wstring &error) {
+    Snapshot current;
+    if (!Read(current, error))
+        return false;
+    auto profile = TraySupport::ReadText(ProfilePath(directory));
+    auto images = ReadSection(profile, L"[monitors]");
+    auto defaults =
+        ReadSection(TraySupport::ReadText(directory + L"\\wallpapers.ini"), L"[byresolution]");
+    std::vector<Change> changes;
+    for (const auto &monitor : current.monitors) {
+        if (!monitor.connected)
+            continue;
+        auto saved = images.find(Escape(monitor.identity));
+        auto resolution = std::to_wstring(monitor.rect.right - monitor.rect.left) + L"x" +
+                          std::to_wstring(monitor.rect.bottom - monitor.rect.top);
+        auto image =
+            ResolveImage(directory, saved == images.end() ? defaults[resolution] : saved->second);
+        if (!image.empty())
+            changes.push_back({monitor, std::move(image)});
+    }
+    if (changes.empty()) {
+        error = L"当前连接的显示器没有壁纸配置。请在「显示器壁纸」里选择图片并应用。";
+        return false;
+    }
+    auto position = current.position;
+    auto savedPosition = ReadSection(profile, L"[settings]")[L"position"];
+    if (savedPosition.size() == 1 && savedPosition[0] >= L'0' && savedPosition[0] <= L'5')
+        position = static_cast<DESKTOP_WALLPAPER_POSITION>(savedPosition[0] - L'0');
+    if (position == DWPOS_SPAN)
+        position = DWPOS_FILL;
+    return Apply(changes, position, position != current.position, error);
 }
 } // namespace Wallpaper

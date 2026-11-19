@@ -125,6 +125,42 @@ int wmain(int argc, wchar_t **argv) {
               Wallpaper::DefaultImage(directory, 800, 600).empty(),
           "default image uses the exact monitor resolution and resolves paths against the portable "
           "root");
+    auto profile = directory + L"\\wallpaper-selection.ini";
+    DeleteFileW(profile.c_str());
+    WallpaperTest::Reset();
+    WallpaperTest::snapshot = WallpaperTest::Fixture(second);
+    WallpaperTest::snapshot.position = DWPOS_SPAN;
+    Check(Wallpaper::Reapply(directory, error) && WallpaperTest::writes.size() == 2 &&
+              WallpaperTest::snapshot.monitors[0].image == first &&
+              WallpaperTest::snapshot.monitors[1].image == first &&
+              WallpaperTest::snapshot.monitors[2].image == second &&
+              WallpaperTest::snapshot.position == DWPOS_FILL,
+          "first menu use applies resolution defaults to connected screens in an independent "
+          "display mode");
+
+    Check(Wallpaper::Apply({{a, second}}, DWPOS_FIT, true, error, directory),
+          "explicit application saves a portable device selection and position");
+    WallpaperTest::Reset();
+    WallpaperTest::snapshot = WallpaperTest::Fixture(first);
+    WallpaperTest::snapshot.monitors[0].devicePath = L"replacement-port";
+    std::swap(WallpaperTest::snapshot.monitors[0], WallpaperTest::snapshot.monitors[1]);
+    auto &restored = WallpaperTest::snapshot.monitors[1];
+    Check(Wallpaper::Reapply(directory, error) && WallpaperTest::writes.size() == 2 &&
+              restored.image == second && WallpaperTest::snapshot.monitors[0].image == first &&
+              WallpaperTest::snapshot.position == DWPOS_FIT,
+          "reapply restores last applied custom wallpaper by identity after Windows changes it and "
+          "ports move");
+
+    WallpaperTest::Reset();
+    WallpaperTest::rejectWrite = 1;
+    Check(!Wallpaper::Apply({{restored, first}}, DWPOS_CENTER, true, error, directory),
+          "a failed Windows write does not commit a new saved selection");
+    WallpaperTest::Reset();
+    restored.image = first;
+    Check(Wallpaper::Reapply(directory, error) && restored.image == second &&
+              WallpaperTest::snapshot.position == DWPOS_FIT,
+          "reapply keeps using the previous successful profile after a failed apply");
+    DeleteFileW(profile.c_str());
     DeleteFileW(defaults.c_str());
     DeleteFileW(first.c_str());
     DeleteFileW(second.c_str());

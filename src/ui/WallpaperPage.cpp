@@ -17,6 +17,7 @@ namespace {
 struct Row {
     Wallpaper::Monitor monitor;
     std::wstring draft;
+    bool edited = false;
 };
 struct State {
     std::wstring directory;
@@ -110,7 +111,7 @@ void Select(HWND page, State &state, int index) {
 std::vector<Wallpaper::Change> Changes(const State &state) {
     std::vector<Wallpaper::Change> changes;
     for (const auto &row : state.rows)
-        if (row.draft != row.monitor.image)
+        if (row.edited)
             changes.push_back({row.monitor, row.draft});
     return changes;
 }
@@ -256,12 +257,13 @@ void Refresh(HWND page) {
             return r.monitor.devicePath == monitor.devicePath &&
                    r.monitor.identity == monitor.identity;
         });
-        if (monitor.connected && old != previous.end() && old->draft != old->monitor.image)
+        bool edited = monitor.connected && old != previous.end() && old->edited;
+        if (edited)
             draft = old->draft;
-        state->rows.push_back({std::move(monitor), std::move(draft)});
+        state->rows.push_back({std::move(monitor), std::move(draft), edited});
     }
     bool lost = std::any_of(previous.begin(), previous.end(), [&](const Row &r) {
-        return r.draft != r.monitor.image &&
+        return r.edited &&
                std::none_of(state->rows.begin(), state->rows.end(), [&](const Row &now) {
                    return now.monitor.connected && now.monitor.devicePath == r.monitor.devicePath &&
                           now.monitor.identity == r.monitor.identity;
@@ -323,10 +325,12 @@ bool Apply(HWND page, std::wstring &error) {
     if (!state)
         return true;
     auto changes = Changes(*state);
-    if (!Wallpaper::Apply(changes, state->position, state->positionEdited, error))
+    if (!Wallpaper::Apply(changes, state->position, state->positionEdited, error, state->directory))
         return false;
-    for (auto &row : state->rows)
+    for (auto &row : state->rows) {
         row.monitor.image = row.draft;
+        row.edited = false;
+    }
     state->positionEdited = false;
     return true;
 }
@@ -383,7 +387,9 @@ INT_PTR Handle(HWND page, UINT message, WPARAM w, LPARAM) {
         return TRUE;
     }
     if (id == IDC_WALL_IMAGE && event == EN_CHANGE && !state->filling && state->selected >= 0) {
-        state->rows[state->selected].draft = Text(GetDlgItem(page, id));
+        auto &row = state->rows[state->selected];
+        row.draft = Text(GetDlgItem(page, id));
+        row.edited = true;
         Dirty(page);
         Status(page, L"图片修改尚未应用；切换显示器会保留草稿，取消或 X 放弃。");
         return TRUE;

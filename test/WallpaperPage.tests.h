@@ -170,6 +170,16 @@ static bool WallpaperPageButtons(std::wstring &report) {
                   WallpaperTest::writes.size() == written,
               L"reopening wallpaper settings reads the applied state instead of the cancelled "
               L"picture");
+        WallpaperTest::snapshot.monitors[0].identity =
+            WallpaperTest::Fixture(first).monitors[0].identity;
+        WallpaperTest::snapshot.monitors[0].image = first;
+        WallpaperTest::snapshot.monitors[1].image = first;
+        WallpaperTest::snapshot.position = DWPOS_TILE;
+        MainProc(mainWindow, WM_COMMAND, ReapplyWallpaperCommand, 0);
+        check(WallpaperTest::snapshot.monitors[0].image == second &&
+                  WallpaperTest::snapshot.monitors[1].image == second &&
+                  WallpaperTest::snapshot.position == DWPOS_FIT,
+              L"tray command restores both saved wallpapers after Windows replaces them");
     }
     WallpaperPage::Refresh(page);
     SaveTestWindow(settingsWindow, baseDir + L"\\wallpaper-settings-preview.bmp");
@@ -189,5 +199,6 @@ static bool WallpaperPageButtons(std::wstring &report) {
     }
     DeleteFileW(first.c_str());
     DeleteFileW(second.c_str());
+    DeleteFileW((baseDir + L"\\wallpaper-selection.ini").c_str());
     return ok;
 }
