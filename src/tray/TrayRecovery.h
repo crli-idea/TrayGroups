@@ -167,7 +167,7 @@ static bool ImportRecovery() {
     MergeRecovery(records);
     return true;
 }
-static bool WriteRecovery() {
+static bool WriteRecovery(bool reuseUnchanged = false) {
     // 先落盘再隐藏；临时文件 + FlushFileBuffers + 原子替换避免留下半份正式记录。
     if (hidden.empty()) {
         bool ok = DeleteFileW(recoveryPath.c_str()) || GetLastError() == ERROR_FILE_NOT_FOUND;
@@ -190,6 +190,12 @@ static bool WriteRecovery() {
                 L"\r\nWasHidden=" + Number(h.originalHidden) + L"\r\nGuid=" +
                 (h.usesGuid ? GuidKey(h.guid) : L"") + L"\r\n";
     }
+    // 例行刷新可复用已落盘的同一份记录。首次隐藏仍走完整的持久化流程。
+    if (reuseUnchanged &&
+        (legacyRecoveryPath.empty() || legacyRecoveryPath == recoveryPath ||
+         GetFileAttributesW(legacyRecoveryPath.c_str()) == INVALID_FILE_ATTRIBUTES) &&
+        ReadText(recoveryPath) == text)
+        return true;
     std::wstring temporary = recoveryPath + L".tmp";
     auto bytes = Utf8(text);
     DWORD written = 0;

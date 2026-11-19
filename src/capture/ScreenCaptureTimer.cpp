@@ -1097,7 +1097,10 @@ void AddMenu(HMENU parent) {
     wchar_t status[80];
     swprintf_s(status, L"下次截图：%02u:%02u（每 %u 分钟）", t.wHour, t.wMinute,
                settings.intervalMinutes);
-    AppendMenuW(submenu, MF_STRING | MF_DISABLED, 0, status);
+    AppendMenuW(submenu, MF_STRING | MF_DISABLED, 0,
+                paused   ? L"定时截图已暂停"
+                : locked ? L"锁屏暂停截图"
+                         : status);
     AppendMenuW(submenu, MF_SEPARATOR, 0, nullptr);
     AppendMenuW(submenu, MF_STRING, CaptureNowCommand, L"立即截图");
     AppendMenuW(submenu, MF_STRING | (paused ? MF_CHECKED : 0), PauseCommand, L"暂停定时截图");

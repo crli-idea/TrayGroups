@@ -7,9 +7,8 @@ static std::vector<std::pair<WPARAM,LPARAM>> testEvents;
 static bool buttonHostMessages = false;
 static LRESULT CALLBACK TestProc(HWND h,UINT msg,WPARAM w,LPARAM l) {
     if(msg==ActCallback){testEvents.push_back({w,l});return 0;}
-    if(buttonHostMessages&&msg==RestoreAllApp)return MainProc(h,msg,w,l);
-    if(buttonHostMessages&&msg==WM_COMMAND&&(LOWORD(w)==CaptureTimer::CaptureNowCommand||
-       LOWORD(w)==CaptureTimer::SettingsCommand||LOWORD(w)==IDC_RESTORE_ALL))return MainProc(h,msg,w,l);
+    if(buttonHostMessages&&(msg==RestoreAllApp||msg==RefreshApp||msg==WM_COMMAND))
+        return MainProc(h,msg,w,l);
     if(buttonHostMessages&&msg==CaptureTimer::CompletionMessage()){CaptureTimer::OnCompletion(w!=0);return 0;}
     return DefWindowProcW(h,msg,w,l);
 }

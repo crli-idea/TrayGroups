@@ -508,6 +508,27 @@ static RECT SettingsRect() {
     y = std::max((int)work.top, std::min(y, (int)work.bottom - settingsHeight));
     return RECT{x, y, x + settingsWidth, y + settingsHeight};
 }
+static void FillPanelSettings() {
+    SetDlgItemInt(settingsPages[1], IDC_PANEL_WIDTH, settingsDraft.panel.width, FALSE);
+    SetDlgItemInt(settingsPages[1], IDC_PANEL_ICON_SIZE, settingsDraft.panel.iconSize, FALSE);
+    SetDlgItemInt(settingsPages[1], IDC_PANEL_COLUMNS, settingsDraft.panel.columns, FALSE);
+    CheckDlgButton(settingsPages[1], IDC_PANEL_NAMES,
+                   settingsDraft.panel.showNames ? BST_CHECKED : BST_UNCHECKED);
+    CheckDlgButton(settingsPages[1], IDC_PANEL_CAPTURE,
+                   settingsDraft.panel.showCapture ? BST_CHECKED : BST_UNCHECKED);
+}
+
+static void ReloadSettingsPage() {
+    if (!settingsWindow)
+        return;
+    settingsDraft = settingsConfig;
+    settingsMatchState = matchState;
+    FillSettings();
+    fillingSettings = true;
+    FillPanelSettings();
+    fillingSettings = false;
+}
+
 static void ShowSettings(int page) {
     ClosePopup();
     if (settingsWindow && IsWindow(settingsWindow)) {
@@ -596,13 +617,7 @@ static void ShowSettings(int page) {
                  SWP_NOSIZE | SWP_NOZORDER);
     FillSettings();
     fillingSettings = true;
-    SetDlgItemInt(settingsPages[1], IDC_PANEL_WIDTH, settingsDraft.panel.width, FALSE);
-    SetDlgItemInt(settingsPages[1], IDC_PANEL_ICON_SIZE, settingsDraft.panel.iconSize, FALSE);
-    SetDlgItemInt(settingsPages[1], IDC_PANEL_COLUMNS, settingsDraft.panel.columns, FALSE);
-    CheckDlgButton(settingsPages[1], IDC_PANEL_NAMES,
-                   settingsDraft.panel.showNames ? BST_CHECKED : BST_UNCHECKED);
-    CheckDlgButton(settingsPages[1], IDC_PANEL_CAPTURE,
-                   settingsDraft.panel.showCapture ? BST_CHECKED : BST_UNCHECKED);
+    FillPanelSettings();
     SetDlgItemTextW(settingsPages[2], IDC_CAPTURE_DIRECTORY, captureDraft.directory.c_str());
     SetDlgItemTextW(settingsPages[2], IDC_CAPTURE_FORMAT, captureDraft.format.c_str());
     SetDlgItemInt(settingsPages[2], IDC_CAPTURE_INTERVAL, captureDraft.intervalMinutes, FALSE);

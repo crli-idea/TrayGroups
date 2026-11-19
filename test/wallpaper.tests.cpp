@@ -130,12 +130,13 @@ int wmain(int argc, wchar_t **argv) {
     WallpaperTest::Reset();
     WallpaperTest::snapshot = WallpaperTest::Fixture(second);
     WallpaperTest::snapshot.position = DWPOS_SPAN;
-    Check(Wallpaper::Reapply(directory, error) && WallpaperTest::writes.size() == 2 &&
+    Check(Wallpaper::Reapply(directory, error) && WallpaperTest::reads == 1 &&
+              WallpaperTest::writes.size() == 2 &&
               WallpaperTest::snapshot.monitors[0].image == first &&
               WallpaperTest::snapshot.monitors[1].image == first &&
               WallpaperTest::snapshot.monitors[2].image == second &&
               WallpaperTest::snapshot.position == DWPOS_FILL,
-          "first menu use applies resolution defaults to connected screens in an independent "
+          "first menu use reads monitors once and applies resolution defaults in an independent "
           "display mode");
 
     Check(Wallpaper::Apply({{a, second}}, DWPOS_FIT, true, error, directory),

@@ -102,6 +102,154 @@ static bool WaitForButtonIcon(UINT id) {
         });
     });
 }
+
+static std::wstring trayTextRequest;
+static void RecordTrayText(const std::wstring &path) {
+    trayTextRequest = path;
+}
+static void CollectMenuCommands(HMENU menu, std::set<UINT> &commands) {
+    for (int index = 0; index < GetMenuItemCount(menu); ++index) {
+        if (auto submenu = GetSubMenu(menu, index))
+            CollectMenuCommands(submenu, commands);
+        else if (UINT id = GetMenuItemID(menu, index); id && id != (UINT)-1)
+            commands.insert(id);
+    }
+}
+static bool TrayMenuRegression(std::wstring &report, const TrayItem &fixture, bool hasFixture) {
+    bool ok = true;
+    auto check = [&](bool value, const wchar_t *name) {
+        report += (value ? L"PASS: " : L"FAIL: ") + std::wstring(name) + L"\n";
+        ok &= value;
+    };
+    auto menu = CreateRootMenu();
+    std::set<UINT> commands, selected;
+    CollectMenuCommands(menu, commands);
+    auto choose = [&](UINT command) {
+        if (!commands.count(command))
+            return false;
+        selected.insert(command);
+        SendMessageW(mainWindow, WM_COMMAND, command, 0);
+        return true;
+    };
+    check(choose(SettingsCommand) && settingsWindow && TabCtrl_GetCurSel(settingsTabs) == 0,
+          L"tray Settings opens the grouping page");
+    check(choose(CaptureTimer::SettingsCommand) && TabCtrl_GetCurSel(settingsTabs) == 2,
+          L"tray Capture Settings selects the screenshot page");
+    check(choose(WallpaperCommand) && TabCtrl_GetCurSel(settingsTabs) == 4,
+          L"tray Wallpaper opens the wallpaper page");
+    check(choose(ResourcesCommand) && resourceWindow && IsWindowVisible(resourceWindow),
+          L"tray Resources shows the process information window");
+    if (resourceWindow)
+        SendMessageW(resourceWindow, WM_SYSCOMMAND, SC_CLOSE, 0);
+    check(choose(CaptureTimer::ResourcesCommand) && CaptureTimer::resourcesWindow &&
+              IsWindowVisible(CaptureTimer::resourcesWindow),
+          L"tray Capture Resources shows the screenshot information window");
+    if (CaptureTimer::resourcesWindow)
+        SendMessageW(CaptureTimer::resourcesWindow, WM_SYSCOMMAND, SC_CLOSE, 0);
+
+    auto previousLogging = DebugLog::enabled.load();
+    check(choose(ToggleLogCommand) && DebugLog::enabled.load() != previousLogging,
+          L"tray logging toggle switches the runtime preference");
+    TrayConfig::Settings saved;
+    saved.Load(configPath);
+    auto updatedMenu = CreateRootMenu();
+    check(saved.debugLogging == DebugLog::enabled.load() &&
+              bool(GetMenuState(updatedMenu, ToggleLogCommand, MF_BYCOMMAND) & MF_CHECKED) ==
+                  saved.debugLogging,
+          L"logging preference persists and the menu checkmark matches");
+    DestroyMenu(updatedMenu);
+    choose(ToggleLogCommand);
+
+    testOpenTrayText = RecordTrayText;
+    trayTextRequest.clear();
+    check(choose(EditConfigCommand) && trayTextRequest == configPath,
+          L"tray Edit Config requests the active groups.ini");
+    auto logPath = DebugLog::path;
+    DebugLog::Initialize(baseDir);
+    check(choose(OpenLogCommand) && trayTextRequest == DebugLog::path,
+          L"tray Open Log requests the active debug log");
+    DebugLog::path = logPath;
+    testOpenTrayText = nullptr;
+    auto changed = settingsConfig;
+    changed.panel.width = 502;
+    changed.iconMatch = L"path-class-tip";
+    check(changed.Save(configPath) && choose(ReloadCommand) &&
+              PumpButtonMessages([] { return settingsConfig.panel.width == 502; }) &&
+              GetDlgItemInt(settingsPages[1], IDC_PANEL_WIDTH, nullptr, FALSE) == 502 &&
+              SendMessageW(matchEdit, CB_GETCURSEL, 0, 0) == 2 &&
+              settingsDraft.iconMatch == changed.iconMatch,
+          L"tray Reload updates settings, visible fields and the draft in an already open sheet");
+    if (settingsWindow)
+        SendMessageW(settingsWindow, WM_SYSCOMMAND, SC_CLOSE, 0);
+
+    auto paused = CaptureTimer::paused;
+    auto locked = CaptureTimer::locked;
+    CaptureTimer::paused = false;
+    CaptureTimer::locked = false;
+    check(choose(CaptureTimer::PauseCommand) && CaptureTimer::paused,
+          L"tray Pause disables scheduled screenshots");
+    updatedMenu = CreateRootMenu();
+    HMENU captureMenu = GetSubMenu(updatedMenu, 2);
+    wchar_t status[80] = {};
+    GetMenuStringW(captureMenu, 0, status, 80, MF_BYPOSITION);
+    check((GetMenuState(captureMenu, CaptureTimer::PauseCommand, MF_BYCOMMAND) & MF_CHECKED) &&
+              std::wstring(status).find(L"暂停") != std::wstring::npos,
+          L"paused capture menu shows its checkmark and paused status");
+    DestroyMenu(updatedMenu);
+    check(choose(CaptureTimer::PauseCommand) && !CaptureTimer::paused,
+          L"tray Pause can resume the schedule");
+    auto encoder = CaptureTimer::testCapture;
+    CaptureTimer::testCapture = ButtonCapture;
+    unsigned captures = buttonCaptureCount.load();
+    check(choose(CaptureTimer::CaptureNowCommand) && PumpButtonMessages([&] {
+              return buttonCaptureCount == captures + 1 && !CaptureTimer::IsBusy();
+          }),
+          L"tray Capture Now calls the screenshot worker and receives completion");
+    CaptureTimer::testCapture = encoder;
+    CaptureTimer::testOpenFolder = ButtonFolder;
+    buttonFolderRequest.clear();
+    check(choose(CaptureTimer::FolderCommand) &&
+              buttonFolderRequest == CaptureTimer::GetPreferences().directory,
+          L"tray Open Folder requests the configured screenshot directory");
+    CaptureTimer::testOpenFolder = nullptr;
+    CaptureTimer::paused = paused;
+    CaptureTimer::locked = locked;
+
+    auto image = baseDir + L"\\menu-wallpaper.bmp";
+    auto defaults = baseDir + L"\\wallpapers.ini";
+    bool wallFixture = WallpaperTest::MakeImage(image) &&
+                       WriteText(defaults, L"[ByResolution]\n640x480=menu-wallpaper.bmp\n");
+    if (wallFixture) {
+        WallpaperTest::Backend backend;
+        WallpaperTest::snapshot = WallpaperTest::Fixture(L"");
+        check(choose(ReapplyWallpaperCommand) && WallpaperTest::reads == 1 &&
+                  WallpaperTest::writes.size() == 2 &&
+                  WallpaperTest::snapshot.monitors[0].image == image &&
+                  WallpaperTest::snapshot.monitors[1].image == image,
+              L"tray Reapply Wallpaper restores both connected displays from one monitor read");
+    } else
+        check(false, L"tray wallpaper fixture");
+    DeleteFileW(defaults.c_str());
+    DeleteFileW(image.c_str());
+
+    // 只隐藏本测试自己的图标，再用菜单恢复。
+    settingsConfig.iconMatch = L"path-class-id";
+    settingsConfig.foldIcons = true;
+    Refresh(true);
+    bool previouslyHidden = hasFixture && !VisibleAtRuntime(fixture.runtime);
+    check(choose(RestoreCommand) && previouslyHidden && VisibleAtRuntime(fixture.runtime) &&
+              !settingsConfig.foldIcons && hidden.empty(),
+          L"tray Restore All restores the test icon and pauses folding");
+    MSG exit = {};
+    check(choose(ExitCommand) && PeekMessageW(&exit, mainWindow, StopApp, StopApp, PM_REMOVE),
+          L"tray Exit requests the normal restore-and-shutdown path");
+    check(commands == selected, L"all enabled tray menu commands were exercised");
+    report +=
+        L"TrayMenuCoverage=" + Number(selected.size()) + L"/" + Number(commands.size()) + L"\n";
+    DestroyMenu(menu);
+    return ok;
+}
+
 static bool SettingsButtonsRegression(std::wstring &report) {
     bool ok = true;
     auto check = [&](bool value, const wchar_t *name) {
@@ -317,6 +465,8 @@ static bool SettingsButtonsRegression(std::wstring &report) {
               L"T panel Restore All button restores its hidden fixture and pauses folding");
     }
     ClosePopup();
+    if (!TrayMenuRegression(report, fixture, row >= 0))
+        ok = false;
     RestoreHidden();
     if (added)
         Shell_NotifyIconW(NIM_DELETE, &notification);

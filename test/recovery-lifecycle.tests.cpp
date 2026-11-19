@@ -27,6 +27,12 @@ static void JournalTests(){
     auto a=FindIcon(8101),b=FindIcon(8102);a.group=b.group=L"Test";items={a,b};hidden.clear();settingsConfig.foldIcons=true;
     FoldAssigned();Check(PresentHidden(8101)&&PresentHidden(8102)&&hidden.size()==1,L"only the newly hidden icon is journaled; pre-hidden icon is untouched");
     auto text=ReadText(recoveryPath);Check(text.find(L"WasHidden=0")!=std::wstring::npos&&text.find(L"Version=3")!=std::wstring::npos&&text.find(GuidKey(ownedGuid))!=std::wstring::npos,L"GUID and original state are committed to version 3 journal before hiding");
+    WIN32_FILE_ATTRIBUTE_DATA before={},after={};
+    bool recorded=GetFileAttributesExW(recoveryPath.c_str(),GetFileExInfoStandard,&before)!=FALSE;
+    RestoreUnassigned();FoldAssigned();
+    Check(recorded&&GetFileAttributesExW(recoveryPath.c_str(),GetFileExInfoStandard,&after)&&
+          CompareFileTime(&before.ftLastWriteTime,&after.ftLastWriteTime)==0&&PresentHidden(8101),
+          L"an unchanged tray refresh keeps the durable recovery journal without rewriting it");
     hidden.clear();RestoreAllOwnedIcons();
     Check(!PresentHidden(8101)&&PresentHidden(8102)&&hidden.empty(),L"Restore All imports the disk journal and preserves the pre-hidden icon");
     Check(ReadText(configPath).find(L"CustomSetting=keep")!=std::wstring::npos&&ReadText(configPath).find(L"FoldOriginalIcons=0")!=std::wstring::npos,L"restore pauses folding without overwriting unrelated settings");
@@ -41,10 +47,20 @@ static void JournalTests(){
     Check(PresentHidden(8102)&&hidden.empty(),L"refresh also preserves an originally hidden icon when its group is removed");
     Hidden stale=Record(b);stale.runtime.started--;hidden={stale};WriteRecovery();hidden.clear();RecoverIcons();
     Check(PresentHidden(8102)&&hidden.empty(),L"stale process lifetime after restart cannot modify a new icon");
+    bool foldCandidate=Until([&]{
+        auto current=ReadTray(false);
+        auto it=std::find_if(current.begin(),current.end(),[](const TrayItem& item){
+            return item.owner==owner&&item.id==8101&&item.addressKnown&&
+                   !(item.state&TBSTATE_HIDDEN)&&CommandMatches(item);
+        });
+        if(it==current.end())return false;
+        a=*it;a.group=L"Test";a.pending=false;return true;
+    });
+    Check(foldCandidate,L"journal lock test uses a live, visible icon with a verified current address");
     hidden={Record(a)};WriteRecovery();std::wstring committed=ReadText(recoveryPath);
     HANDLE locked=CreateFileW(recoveryPath.c_str(),GENERIC_READ,FILE_SHARE_READ,nullptr,OPEN_EXISTING,FILE_ATTRIBUTE_NORMAL,nullptr);
     items={a,b};settingsConfig.foldIcons=true;FoldAssigned();
-    Check(locked!=INVALID_HANDLE_VALUE&&!recoveryHealthy&&!PresentHidden(8101)&&ReadText(recoveryPath)==committed,L"journal commit failure prevents hiding and retains the previous committed file");
+    Check(foldCandidate&&locked!=INVALID_HANDLE_VALUE&&!recoveryHealthy&&!PresentHidden(8101)&&ReadText(recoveryPath)==committed,L"journal commit failure prevents hiding and retains the previous committed file");
     if(locked!=INVALID_HANDLE_VALUE)CloseHandle(locked);hidden.clear();DeleteFileW(recoveryPath.c_str());recoveryHealthy=true;
     std::wstring corrupt=L"[Recovery]\nVersion=2\n[Icon1]\nIconId=8101\n";WriteText(recoveryPath,corrupt);hidden.clear();RestoreHidden();FoldAssigned();
     Check(!recoveryHealthy&&ReadText(recoveryPath)==corrupt&&!PresentHidden(8101),L"corrupt recovery files are retained and block new hides");

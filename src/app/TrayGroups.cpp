@@ -276,7 +276,7 @@ static void RestoreUnassigned() {
             current->state &= ~TBSTATE_HIDDEN;
     }
     hidden = keep;
-    WriteRecovery();
+    WriteRecovery(true);
 }
 static void FoldAssigned() {
     // 退出/销毁阶段绝不重新折叠；写入恢复日志和看护握手必须发生在实际隐藏之前。
@@ -308,11 +308,13 @@ static void FoldAssigned() {
         }
         todo.push_back(n);
     }
-    if (!todo.empty() && !WriteRecovery()) {
+    if (todo.empty())
+        return;
+    if (!WriteRecovery()) {
         hidden = previous;
         return;
     }
-    if (!todo.empty() && !EnsureRecoveryGuard())
+    if (!EnsureRecoveryGuard())
         return;
     std::vector<RuntimeIdentity> rejected;
     for (size_t n : todo) {
@@ -324,7 +326,7 @@ static void FoldAssigned() {
     }
     // Display only icons Explorer confirms hidden; a successful request alone
     // is not proof that the original has disappeared.
-    if (!todo.empty()) {
+    {
         auto live = ReadTrayLocations();
         for (auto &item : items) {
             bool found = false, visible = false;
@@ -350,8 +352,9 @@ static void FoldAssigned() {
                      hidden.end());
         FreeItems(live);
     }
-    // Keep all successful requests journaled, including delayed Explorer updates.
-    WriteRecovery();
+    // 成功的隐藏请求在执行前已落盘，仅在拒绝导致记录变化时重写。
+    if (!rejected.empty())
+        WriteRecovery(true);
 }
 
 static HICON MakeAppIcon() {
@@ -675,86 +678,126 @@ static void RestoreAllOwnedIcons() {
         FillSettings();
     }
 }
-static constexpr UINT ReapplyWallpaperCommand = 11;
+enum TrayMenuCommand : UINT {
+    SettingsCommand = 1,
+    ResourcesCommand = 2,
+    ReloadCommand = 4,
+    RestoreCommand = 5,
+    ExitCommand = 6,
+    EditConfigCommand = 7,
+    OpenLogCommand = 8,
+    ToggleLogCommand = 9,
+    WallpaperCommand = 10,
+    ReapplyWallpaperCommand = 11
+};
+
+static HMENU CreateRootMenu() {
+    HMENU menu = CreatePopupMenu();
+    if (!menu)
+        return nullptr;
+    AppendMenuW(menu, MF_STRING, SettingsCommand, L"设置分组…");
+    AppendMenuW(menu, MF_STRING, ResourcesCommand, L"资源占用");
+    CaptureTimer::AddMenu(menu);
+    AppendMenuW(menu, MF_STRING, WallpaperCommand, L"显示器壁纸…");
+    AppendMenuW(menu, MF_STRING, ReapplyWallpaperCommand, L"重新应用壁纸");
+    AppendMenuW(menu, MF_STRING, ReloadCommand, L"重新加载配置并刷新");
+    AppendMenuW(menu, MF_STRING, EditConfigCommand, L"编辑 groups.ini 配置文件");
+    AppendMenuW(menu, MF_STRING, OpenLogCommand, L"打开本地调试日志");
+    AppendMenuW(menu, MF_STRING | (DebugLog::enabled.load() ? MF_CHECKED : 0), ToggleLogCommand,
+                L"记录本地调试日志");
+    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+    AppendMenuW(menu, MF_STRING, RestoreCommand, L"恢复本程序隐藏的全部图标");
+    AppendMenuW(menu, MF_STRING, ExitCommand, L"退出（恢复原图标）");
+    return menu;
+}
 static void RootMenu() {
     DebugLog::Write(L"MENU open");
     ClosePopup();
-    HMENU menu = CreatePopupMenu();
-    AppendMenuW(menu, MF_STRING, 1, L"设置分组…");
-    AppendMenuW(menu, MF_STRING, 2, L"资源占用");
-    CaptureTimer::AddMenu(menu);
-    AppendMenuW(menu, MF_STRING, 10, L"显示器壁纸…");
-    AppendMenuW(menu, MF_STRING, ReapplyWallpaperCommand, L"重新应用壁纸");
-    AppendMenuW(menu, MF_STRING, 4, L"重新加载配置并刷新");
-    AppendMenuW(menu, MF_STRING, 7, L"编辑 groups.ini 配置文件");
-    AppendMenuW(menu, MF_STRING, 8, L"打开本地调试日志");
-    AppendMenuW(menu, MF_STRING | (DebugLog::enabled.load() ? MF_CHECKED : 0), 9,
-                L"记录本地调试日志");
-    AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-    AppendMenuW(menu, MF_STRING, 5, L"恢复本程序隐藏的全部图标");
-    AppendMenuW(menu, MF_STRING, 6, L"退出（恢复原图标）");
-    POINT pt;
-    GetCursorPos(&pt);
+    HMENU menu = CreateRootMenu();
+    if (!menu)
+        return;
+    POINT point;
+    GetCursorPos(&point);
     SetForegroundWindow(mainWindow);
-    int id =
-        TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, pt.x, pt.y, 0, mainWindow, nullptr);
+    UINT command = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON, point.x, point.y, 0,
+                                  mainWindow, nullptr);
     DestroyMenu(menu);
     PostMessageW(mainWindow, WM_NULL, 0, 0);
-    DebugLog::Write(L"MENU command=" + Number(id));
-    if (id == 8) {
-        ShellExecuteW(mainWindow, L"open", L"notepad.exe", (L"\"" + DebugLog::path + L"\"").c_str(),
-                      baseDir.c_str(), SW_SHOWNORMAL);
+    if (command) {
+        DebugLog::Write(L"MENU command=" + Number(command));
+        PostMessageW(mainWindow, WM_COMMAND, command, 0);
+    }
+}
+
+#ifdef NATIVE_TEST_BUILD
+static void (*testOpenTrayText)(const std::wstring &) = nullptr;
+#endif
+static void OpenTrayText(HWND owner, const std::wstring &path) {
+#ifdef NATIVE_TEST_BUILD
+    if (testOpenTrayText) {
+        testOpenTrayText(path);
         return;
     }
-    if (id == 9) {
+#endif
+    if ((INT_PTR)ShellExecuteW(owner, L"open", L"notepad.exe", (L"\"" + path + L"\"").c_str(),
+                               baseDir.c_str(), SW_SHOWNORMAL) <= 32)
+        LogError(L"无法打开文件：" + path);
+}
+static bool HandleTrayCommand(HWND owner, UINT command) {
+    switch (command) {
+    case SettingsCommand:
+        ShowSettings();
+        return true;
+    case ResourcesCommand:
+        ShowResources();
+        return true;
+    case WallpaperCommand:
+        ShowSettings(4);
+        return true;
+    case CaptureTimer::SettingsCommand:
+        ShowSettings(2);
+        return true;
+    case ReapplyWallpaperCommand: {
+        std::wstring error;
+        if (Wallpaper::Reapply(baseDir, error)) {
+            WallpaperPage::Refresh(settingsPages[4]);
+        } else {
+            LogError(error);
+            MessageBoxW(owner, error.c_str(), L"重新应用壁纸", MB_ICONWARNING);
+        }
+        return true;
+    }
+    case ReloadCommand:
+        PostMessageW(owner, RefreshApp, 0, 0);
+        return true;
+    case RestoreCommand:
+    case IDC_RESTORE_ALL:
+        RestoreAllOwnedIcons();
+        return true;
+    case ExitCommand:
+        PostMessageW(owner, StopApp, 0, 0);
+        return true;
+    case EditConfigCommand:
+        OpenTrayText(owner, configPath);
+        return true;
+    case OpenLogCommand:
+        OpenTrayText(owner, DebugLog::path);
+        return true;
+    case ToggleLogCommand: {
         bool previous = DebugLog::enabled.load();
         DebugLog::Write(L"DEBUG logging disabled");
         DebugLog::enabled = !previous;
         if (!SaveSettings()) {
             DebugLog::enabled = previous;
-            MessageBoxW(mainWindow, L"无法保存日志开关", L"TrayGroups", MB_ICONERROR);
-        } else
+            settingsConfig.debugLogging = previous;
+            MessageBoxW(owner, L"无法保存日志开关", L"TrayGroups", MB_ICONERROR);
+        } else {
             DebugLog::Write(L"DEBUG logging enabled");
-        return;
-    }
-    if (id == CaptureTimer::SettingsCommand) {
-        ShowSettings(2);
-        return;
-    }
-    if (id == 10) {
-        ShowSettings(4);
-        return;
-    }
-    if (id == ReapplyWallpaperCommand) {
-        PostMessageW(mainWindow, WM_COMMAND, ReapplyWallpaperCommand, 0);
-        return;
-    }
-    if (CaptureTimer::HandleMenu(id))
-        return;
-    if (id == 1)
-        ShowSettings();
-    else if (id == 2)
-        ShowResources();
-    else if (id == 4) {
-        RestoreHidden();
-        LoadSettings();
-        Refresh();
-        if (settingsWindow)
-            FillSettings();
-    } else if (id == 5)
-        RestoreAllOwnedIcons();
-    else if (id == 6)
-        PostMessageW(mainWindow, StopApp, 0, 0);
-    else if (id == 7) {
-        std::wstring cmd = L"notepad.exe \"" + configPath + L"\"";
-        STARTUPINFOW si = {};
-        si.cb = sizeof(si);
-        PROCESS_INFORMATION pi = {};
-        if (CreateProcessW(nullptr, &cmd[0], nullptr, nullptr, FALSE, 0, nullptr, nullptr, &si,
-                           &pi)) {
-            CloseHandle(pi.hThread);
-            CloseHandle(pi.hProcess);
         }
+        return true;
+    }
+    default:
+        return CaptureTimer::HandleMenu(command);
     }
 }
 static LRESULT CALLBACK MainProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
@@ -830,33 +873,10 @@ static LRESULT CALLBACK MainProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
         RestoreHidden();
         LoadSettings();
         Refresh();
-        if (settingsWindow)
-            FillSettings();
+        ReloadSettingsPage();
         return 0;
     }
-    if (msg == WM_COMMAND && LOWORD(w) == 1) {
-        ShowSettings();
-        return 0;
-    }
-    if (msg == WM_COMMAND && LOWORD(w) == IDC_RESTORE_ALL) {
-        RestoreAllOwnedIcons();
-        return 0;
-    }
-    if (msg == WM_COMMAND && LOWORD(w) == CaptureTimer::SettingsCommand) {
-        ShowSettings(2);
-        return 0;
-    }
-    if (msg == WM_COMMAND && LOWORD(w) == ReapplyWallpaperCommand) {
-        std::wstring error;
-        if (Wallpaper::Reapply(baseDir, error)) {
-            WallpaperPage::Refresh(settingsPages[4]);
-        } else {
-            LogError(error);
-            MessageBoxW(h, error.c_str(), L"重新应用壁纸", MB_ICONWARNING);
-        }
-        return 0;
-    }
-    if (msg == WM_COMMAND && CaptureTimer::HandleMenu(LOWORD(w)))
+    if (msg == WM_COMMAND && HandleTrayCommand(h, LOWORD(w)))
         return 0;
     if (msg == WM_WTSSESSION_CHANGE) {
         CaptureTimer::OnSessionChange(w);
@@ -964,7 +984,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, LPWSTR cmd, int) {
     }
     if (existing) {
         if (args != L"--background")
-            PostMessageW(existing, WM_COMMAND, 1, 0);
+            PostMessageW(existing, WM_COMMAND, SettingsCommand, 0);
         return 0;
     }
     HANDLE mutex = CreateMutexW(nullptr, FALSE, L"Local\\Crli.TrayGroups.Native.Instance");

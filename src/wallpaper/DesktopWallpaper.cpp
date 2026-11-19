@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cwctype>
 #include <map>
+#include <set>
 
 namespace Wallpaper {
 #ifdef NATIVE_TEST_BUILD
@@ -239,12 +240,12 @@ bool ImageValid(const std::wstring &path, std::wstring &error) {
 }
 bool MatchChanges(const Snapshot &current, const std::vector<Change> &changes,
                   std::wstring &error) {
-    for (size_t n = 0; n < changes.size(); ++n) {
-        const auto &old = changes[n].monitor;
-        auto match =
-            std::find_if(current.monitors.begin(), current.monitors.end(), [&](const Monitor &m) {
-                return Lower(m.devicePath) == Lower(old.devicePath);
-            });
+    std::set<std::wstring> targets, images;
+    for (const auto &change : changes) {
+        const auto &old = change.monitor;
+        auto path = Lower(old.devicePath);
+        auto match = std::find_if(current.monitors.begin(), current.monitors.end(),
+                                  [&](const Monitor &m) { return Lower(m.devicePath) == path; });
         if (match == current.monitors.end() || !match->connected ||
             match->identity != old.identity) {
             error = L"显示器已断开或身份发生变化，请刷新后重新选择：" + Label(old);
@@ -256,12 +257,11 @@ bool MatchChanges(const Snapshot &current, const std::vector<Change> &changes,
             error = L"当前屏幕使用复制显示模式，请先在 Windows 中切换为扩展显示，再设置独立壁纸。";
             return false;
         }
-        for (size_t k = 0; k < n; ++k)
-            if (Lower(changes[k].monitor.devicePath) == Lower(old.devicePath)) {
-                error = L"同一显示器不能重复设置。";
-                return false;
-            }
-        if (!ImageValid(changes[n].image, error))
+        if (!targets.insert(path).second) {
+            error = L"同一显示器不能重复设置。";
+            return false;
+        }
+        if (images.insert(change.image).second && !ImageValid(change.image, error))
             return false;
     }
     return true;
@@ -340,14 +340,13 @@ std::wstring DefaultImage(const std::wstring &directory, int width, int height) 
     return ResolveImage(directory,
                         defaults[std::to_wstring(width) + L"x" + std::to_wstring(height)]);
 }
-bool Read(Snapshot &snapshot, std::wstring &error) {
+static bool ReadSnapshot(Service &service, Snapshot &snapshot, std::wstring &error) {
 #ifdef NATIVE_TEST_BUILD
     if (testHooks.read)
         return testHooks.read(snapshot, error);
 #endif
     error.clear();
     snapshot = {};
-    Service service;
     if (!service.Open(error))
         return false;
     UINT count = 0;
@@ -399,16 +398,16 @@ bool Read(Snapshot &snapshot, std::wstring &error) {
         snapshot.slideshow = (status & DSS_SLIDESHOW) != 0;
     return true;
 }
-bool Apply(const std::vector<Change> &changes, DESKTOP_WALLPAPER_POSITION position,
-           bool changePosition, std::wstring &error, const std::wstring &saveDirectory) {
-    error.clear();
-    if (changes.empty() && !changePosition)
-        return true;
-    Snapshot current;
-    if (!Read(current, error))
-        return false;
+bool Read(Snapshot &snapshot, std::wstring &error) {
     Service service;
-    if (!service.Open(error) || !MatchChanges(current, changes, error))
+    return ReadSnapshot(service, snapshot, error);
+}
+
+static bool ApplySnapshot(Service &service, const Snapshot &current,
+                          const std::vector<Change> &changes, DESKTOP_WALLPAPER_POSITION position,
+                          bool changePosition, std::wstring &error,
+                          const std::wstring &saveDirectory) {
+    if (!MatchChanges(current, changes, error))
         return false;
     if (changePosition && (position < DWPOS_CENTER || position > DWPOS_SPAN)) {
         error = L"壁纸显示方式无效。";
@@ -468,14 +467,26 @@ bool Apply(const std::vector<Change> &changes, DESKTOP_WALLPAPER_POSITION positi
     return true;
 }
 
-bool Reapply(const std::wstring &directory, std::wstring &error) {
+bool Apply(const std::vector<Change> &changes, DESKTOP_WALLPAPER_POSITION position,
+           bool changePosition, std::wstring &error, const std::wstring &saveDirectory) {
+    error.clear();
+    if (changes.empty() && !changePosition)
+        return true;
+    Service service;
     Snapshot current;
-    if (!Read(current, error))
-        return false;
+    return ReadSnapshot(service, current, error) &&
+           ApplySnapshot(service, current, changes, position, changePosition, error, saveDirectory);
+}
+
+bool Reapply(const std::wstring &directory, std::wstring &error) {
     auto profile = TraySupport::ReadText(ProfilePath(directory));
     auto images = ReadSection(profile, L"[monitors]");
     auto defaults =
         ReadSection(TraySupport::ReadText(directory + L"\\wallpapers.ini"), L"[byresolution]");
+    Service service;
+    Snapshot current;
+    if (!ReadSnapshot(service, current, error))
+        return false;
     std::vector<Change> changes;
     for (const auto &monitor : current.monitors) {
         if (!monitor.connected)
@@ -498,6 +509,7 @@ bool Reapply(const std::wstring &directory, std::wstring &error) {
         position = static_cast<DESKTOP_WALLPAPER_POSITION>(savedPosition[0] - L'0');
     if (position == DWPOS_SPAN)
         position = DWPOS_FILL;
-    return Apply(changes, position, position != current.position, error);
+    return ApplySnapshot(service, current, changes, position, position != current.position, error,
+                         L"");
 }
 } // namespace Wallpaper
