@@ -1,7 +1,7 @@
 #pragma once
 #include "UiStyle.h"
 
-// ListView 管理布局、焦点、滚动与提示；快照持有图标副本，避免后台刷新使其失效。
+// 图像列表持有像素，面板快照保留提示和原图标身份，后台刷新时两者均可继续使用。
 static HWND popupList = nullptr;
 static HIMAGELIST popupImages = nullptr;
 static std::vector<TrayItem> popupIcons;
@@ -38,7 +38,7 @@ static RECT TileRect(int index) {
 static void PerformTile(int tile, int action, bool keyboard = false) {
     if (tile < 0 || tile >= (int)popupIcons.size())
         return;
-    TrayItem item = popupIcons[tile];
+    TrayItem item = std::move(popupIcons[tile]);
     POINT point;
     if (keyboard) {
         RECT rect = TileRect(tile);
@@ -160,7 +160,6 @@ static LRESULT CALLBACK PopupProc(HWND window, UINT message, WPARAM w, LPARAM l)
             popupImages = nullptr;
         }
         popupIcons.clear();
-        popupItems.clear();
         popupList = nullptr;
         popupWindow = nullptr;
         pendingClick = -1;
@@ -179,20 +178,24 @@ static void OpenTrayPanel() {
     for (const auto &name : names)
         if (!name.empty())
             popupGroups.push_back(name);
-    for (const auto &group : popupGroups)
-        for (size_t n = 0; n < items.size(); ++n)
-            if (items[n].group == group && PopupEligible(items[n])) {
-                popupItems.push_back((int)n);
-                popupIcons.push_back(items[n]);
-            }
+    std::map<std::wstring, std::vector<TrayItem>> byGroup;
+    int iconCount = 0;
+    for (auto &item : items) {
+        // 先移走 HICON，复制元数据时就无需再次 CopyIcon。
+        auto image = std::move(item.image);
+        if (!PopupEligible(item))
+            continue;
+        auto &group = byGroup[item.group];
+        group.push_back(item);
+        group.back().image = std::move(image);
+        ++iconCount;
+    }
     RECT work = CursorWorkArea();
     popupWindow =
         CreateWindowExW(WS_EX_TOOLWINDOW | WS_EX_TOPMOST, PopupClass, L"托盘分组",
                         WS_POPUP | WS_BORDER | WS_CLIPCHILDREN, work.left + 8, work.top + 8, 420,
                         100, mainWindow, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (!popupWindow) {
-        popupIcons.clear();
-        popupItems.clear();
         LogError(L"无法打开分组面板");
         return;
     }
@@ -201,8 +204,7 @@ static void OpenTrayPanel() {
     int gap = PanelPx(8), footer = popupOptions.showCapture ? PanelPx(81) : PanelPx(8);
     int rows = 0;
     for (const auto &group : popupGroups) {
-        int count = (int)std::count_if(popupIcons.begin(), popupIcons.end(),
-                                       [&](const TrayItem &i) { return i.group == group; });
+        int count = (int)byGroup[group].size();
         rows += std::max(1, (count + popupOptions.columns - 1) / popupOptions.columns);
     }
     int desired = rows * PanelPx(popupOptions.iconSize + (popupOptions.showNames ? 42 : 25)) +
@@ -232,7 +234,7 @@ static void OpenTrayPanel() {
     ListView_SetExtendedListViewStyle(popupList, LVS_EX_DOUBLEBUFFER | LVS_EX_INFOTIP);
     SetWindowTheme(popupList, L"Explorer", nullptr);
     int size = PanelPx(popupOptions.iconSize);
-    popupImages = ImageList_Create(size, size, ILC_COLOR32 | ILC_MASK, (int)popupIcons.size(), 4);
+    popupImages = ImageList_Create(size, size, ILC_COLOR32 | ILC_MASK, iconCount, 4);
     ListView_SetImageList(popupList, popupImages, LVSIL_NORMAL);
     // 预留系统滚动条宽度，避免出现滚动条后每行突然少一个图标。
     int cellWidth =
@@ -242,6 +244,7 @@ static void OpenTrayPanel() {
     ListView_SetIconSpacing(popupList, cellWidth,
                             PanelPx(popupOptions.iconSize + (popupOptions.showNames ? 42 : 25)));
     ListView_EnableGroupView(popupList, TRUE);
+    popupIcons.reserve(iconCount);
     for (size_t n = 0; n < popupGroups.size(); ++n) {
         LVGROUP group = {};
         group.cbSize = sizeof(group);
@@ -249,18 +252,24 @@ static void OpenTrayPanel() {
         group.iGroupId = (int)n;
         group.pszHeader = (LPWSTR)popupGroups[n].c_str();
         ListView_InsertGroup(popupList, -1, &group);
-    }
-    for (size_t n = 0; n < popupIcons.size(); ++n) {
-        const auto &icon = popupIcons[n];
-        auto label = popupOptions.showNames ? FriendlyIconName(icon) : L"";
-        LVITEMW item = {};
-        item.mask = LVIF_TEXT | LVIF_IMAGE | LVIF_GROUPID;
-        item.iItem = (int)n;
-        item.pszText = (LPWSTR)label.c_str();
-        item.iImage = ImageList_AddIcon(popupImages, icon.image);
-        item.iGroupId = (int)(std::find(popupGroups.begin(), popupGroups.end(), icon.group) -
-                              popupGroups.begin());
-        ListView_InsertItem(popupList, &item);
+        for (auto &icon : byGroup[popupGroups[n]]) {
+            auto label = popupOptions.showNames ? FriendlyIconName(icon) : L"";
+            LVITEMW item = {};
+            item.mask = LVIF_TEXT | LVIF_IMAGE | LVIF_GROUPID;
+            item.iItem = (int)popupIcons.size();
+            item.pszText = label.data();
+            item.iImage = I_IMAGENONE;
+            item.iGroupId = group.iGroupId;
+            if (popupImages && icon.image) {
+                int index = ImageList_AddIcon(popupImages, icon.image);
+                if (index >= 0)
+                    item.iImage = index;
+            }
+            // ImageList_AddIcon 已复制像素，立即释放扫描得到的 HICON。
+            icon.image.Reset();
+            if (ListView_InsertItem(popupList, &item) >= 0)
+                popupIcons.push_back(std::move(icon));
+        }
     }
     UiStyle::StyleChildren(popupWindow);
     // 使用系统实际排版尺寸收紧面板，不用手工估算字体和组标题高度。

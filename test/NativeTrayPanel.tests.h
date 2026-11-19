@@ -33,6 +33,8 @@ static bool NativePanelRegression(std::wstring &report) {
         items.push_back(std::move(item));
         settingsConfig.programAssignments[items.back().process] = items.back().group;
     }
+    ungrouped.image = CopyIcon(appIcon);
+    items.push_back(std::move(ungrouped));
     OpenTrayPanel();
     RedrawWindow(popupWindow, nullptr, nullptr, RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     wchar_t cls[64] = {};
@@ -51,13 +53,31 @@ static bool NativePanelRegression(std::wstring &report) {
                      RDW_INVALIDATE | RDW_UPDATENOW | RDW_ALLCHILDREN);
     check(gdi == GetGuiResources(GetCurrentProcess(), GR_GDIOBJECTS),
           L"repainting system controls does not leak GDI objects");
-    auto snapshot = popupIcons;
+    check(
+        std::none_of(items.begin(), items.end(), [](const TrayItem &icon) { return icon.image; }) &&
+            std::none_of(popupIcons.begin(), popupIcons.end(),
+                         [](const TrayItem &icon) { return icon.image; }),
+        L"panel releases scan icons after copying pixels into the image list");
+    auto snapshot = items;
     FreeItems(items);
-    check(popupIcons.size() == 12 && popupIcons.front().image,
-          L"open system list owns images independently of background scan results");
+    LVITEMW firstImage = {};
+    firstImage.mask = LVIF_IMAGE;
+    wchar_t text[128] = {};
+    NMLVGETINFOTIPW tip = {};
+    tip.hdr.hwndFrom = popupList;
+    tip.hdr.code = LVN_GETINFOTIPW;
+    tip.pszText = text;
+    tip.cchTextMax = ARRAYSIZE(text);
+    SendMessageW(popupWindow, WM_NOTIFY, 0, (LPARAM)&tip);
+    check(popupIcons.size() == 12 && snapshot.front().tip == text &&
+              ImageList_GetImageCount(popupImages) == 12 &&
+              ListView_GetItem(popupList, &firstImage) && firstImage.iImage == 0,
+          L"panel retains images and tooltip text after clearing background scan results");
     ClosePopup();
-    for (int n = 0; n < 100; ++n)
+    for (int n = 0; n < 100; ++n) {
         items.push_back(snapshot[n % 12]);
+        items.back().image = CopyIcon(appIcon);
+    }
     OpenTrayPanel();
     RECT before, footer;
     GetWindowRect(popupWindow, &before);

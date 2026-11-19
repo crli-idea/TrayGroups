@@ -58,7 +58,7 @@ static int SelfTest() {
     }else pass=false;
     WNDCLASSW pc={};pc.lpfnWndProc=PopupProc;pc.hInstance=GetModuleHandleW(nullptr);pc.lpszClassName=PopupClass;pc.style=CS_DBLCLKS;RegisterClassW(&pc);
     for(size_t n=0;n<items.size();n++)for(int action=0;action<3;action++){
-        popupItems={(int)n};popupIcons={items[n]};testEvents.clear();POINT point;GetCursorPos(&point);auto expected=CallbackSequence(items[n].id,items[n].version,action,point);
+        popupIcons={items[n]};testEvents.clear();POINT point;GetCursorPos(&point);auto expected=CallbackSequence(items[n].id,items[n].version,action,point);
         popupWindow=CreateWindowW(PopupClass,L"",WS_POPUP,0,0,420,120,nullptr,nullptr,pc.hInstance,nullptr);
         popupList=CreateWindowW(WC_LISTVIEWW,L"",WS_CHILD|LVS_ICON,0,0,420,120,popupWindow,nullptr,pc.hInstance,nullptr);
         NMITEMACTIVATE click={};click.hdr.hwndFrom=popupList;click.hdr.code=action==0?NM_CLICK:action==1?NM_DBLCLK:NM_RCLICK;click.iItem=0;
@@ -252,7 +252,7 @@ static bool HiddenPopupRegression(std::wstring& report) {
     for(int action=0;action<3;action++){
         // Exercise the actual T handler, not just the popup construction function.
         MainProc(mainWindow,WM_APP+8,1,1);
-        bool onlyHidden=popupItems.size()==1&&items[popupItems[0]].owner==mainWindow&&items[popupItems[0]].id==701;
+        bool onlyHidden=popupIcons.size()==1&&popupIcons[0].owner==mainWindow&&popupIcons[0].id==701;
         check(onlyHidden&&popupGroups==std::vector<std::wstring>{L"\u9690\u85cf"},L"T immediately shows only hidden grouped icon and no ungrouped entry");
         if(popupWindow&&onlyHidden){
             RedrawWindow(popupWindow,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN);
@@ -306,8 +306,8 @@ static bool HiddenPopupRegression(std::wstring& report) {
     NativeVisibility(identity,false);reFoldAttempts=1;MainProc(mainWindow,WM_TIMER,ReFoldTimer,0);
     check(!VisibleAtRuntime(identity.runtime),L"post-click timer folds a program icon revealed by its own update");
     RestoreHidden();settingsConfig.foldIcons=false;Refresh();
-    ShowGroups();check(popupItems.empty(),L"paused folding does not duplicate visible Windows icons in T");
-    ClosePopup();ShowGroups();check(popupItems.empty()&&std::find(popupGroups.begin(),popupGroups.end(),L"")==popupGroups.end(),L"empty-group requests never expose Windows-owned ungrouped icons");
+    ShowGroups();check(popupIcons.empty(),L"paused folding does not duplicate visible Windows icons in T");
+    ClosePopup();ShowGroups();check(popupIcons.empty()&&std::find(popupGroups.begin(),popupGroups.end(),L"")==popupGroups.end(),L"empty-group requests never expose Windows-owned ungrouped icons");
     ClosePopup();RestoreHidden();
     check(VisibleAtRuntime(identity.runtime)&&hidden.empty()&&GetFileAttributesW(recoveryPath.c_str())==INVALID_FILE_ATTRIBUTES,L"all hidden test icons restored and recovery journal removed");
     KillTimer(mainWindow,ReFoldTimer);reFoldAttempts=0;
@@ -360,7 +360,7 @@ static bool GuidRegression(std::wstring& report) {
         matcher.ResolveGroups(items);FoldAssigned();
         check(hidden.size()==1&&!VisibleAtRuntime(identity.runtime),L"GUID-addressed tray icon really hides through Shell notification state API");
         ClosePopup();ShowGroups();bool present=false;
-        for(int n:popupItems)if(items[n].owner==mainWindow&&items[n].id==703)present=true;
+        for(const auto& icon:popupIcons)if(icon.owner==mainWindow&&icon.id==703)present=true;
         check(present,L"GUID hidden icon appears in T popup");
         ClosePopup();
         testEvents.clear();POINT pos={100,100};bool sent=Forward(identity,2,pos);auto expected=CallbackSequence(703,4,2,pos);

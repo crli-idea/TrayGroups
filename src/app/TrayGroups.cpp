@@ -78,7 +78,6 @@ static bool testingOwnIcons = false;
 
 static std::vector<TrayItem> items;
 static std::vector<Hidden> hidden;
-static std::vector<int> popupItems;
 static std::vector<TrayItem> settingsItems;
 
 static void LogError(const std::wstring &s) {
@@ -534,7 +533,7 @@ static bool Dispatch(const TrayItem &item, int action, POINT pos) {
     }
     return ok;
 }
-static bool Forward(TrayItem identity, int action, POINT pos) {
+static bool Forward(const TrayItem &identity, int action, POINT pos) {
     // 点击前重找同一生命周期的原图标，沿用它最新的回调和协议版本。
     // Resolve latest callback/version after an application changes its icon.
     auto current = ReadTray(false);

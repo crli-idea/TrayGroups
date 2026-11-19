@@ -4,6 +4,8 @@
 
 SSH 地址：`git@github.com:crli-idea/TrayGroups.git`
 
+1.7.3 优化 T 分组面板。托盘图标按组整理一次，界面取得图像后立即释放扫描时复制的图标句柄。面板仍可在后台刷新后显示图标、提示和转发点击。
+
 1.7.2 修复设置窗口打开时重新加载配置的问题，并在右键菜单显示截图暂停状态。重新应用壁纸时只枚举一次显示器，同一图片只验证一次。例行托盘刷新会复用内容相同的恢复记录。
 
 1.7.1 缩短设置页的「确定」和「应用」等待时间。壁纸只在实际应用时检查一次，托盘只在分组规则或折叠状态变化时重新扫描。
@@ -205,7 +207,7 @@ Windows 保存实际桌面背景。你自行浏览选择的图片保留原路径
 
 运行 `build.ps1` 构建 TrayGroups 单一程序。截图源码在 `src/capture/`，截图测试在 `test/capture/`，所有新编译产物写入 `test/build/`。运行 `test/run-all.ps1` 执行全部测试。
 
-运行 `.\package.ps1 -Version v1.7.2` 生成 `.\TrayGroups-v1.7.2-windows-x64.zip`。便携包包含 `TrayGroups.exe`、干净的默认 `groups.ini`、`wallpapers.ini`、README 和两张 `resources/` 壁纸。INI 模板位于 `defaults/`，不包含个人分组或恢复记录。`config.json` 首次启动时生成。升级时保留自己已有的配置和恢复文件。打包脚本检查文件是否齐全，并校验版本标签与 EXE 版本一致。
+运行 `.\package.ps1 -Version v1.7.3` 生成 `.\TrayGroups-v1.7.3-windows-x64.zip`。便携包包含 `TrayGroups.exe`、干净的默认 `groups.ini`、`wallpapers.ini`、README 和两张 `resources/` 壁纸。INI 模板位于 `defaults/`，不包含个人分组或恢复记录。`config.json` 首次启动时生成。升级时保留自己已有的配置和恢复文件。打包脚本检查文件是否齐全，并校验版本标签与 EXE 版本一致。
 
 每次推送到 `main` 都会通过 GitHub Actions 自动构建、测试并打包，在对应运行页面的 Artifacts 中提供 Windows 便携包；也支持在 Actions 页面手动运行。推送 `v*` 标签时会额外自动创建 Release 并上传便携包。Release 需要仓库允许 Actions 的 `GITHUB_TOKEN` 写入内容。
 
@@ -213,7 +215,7 @@ Windows 保存实际桌面背景。你自行浏览选择的图片保留原路径
 
 每次版本发布前，必须在本地 Windows 上以发布模式运行 `.\build.ps1`，再运行 `.\package.ps1 -Version v版本号`，生成 `.\TrayGroups-v版本号-windows-x64.zip`，方便本地自测，直接在项目根目录查找。ZIP 必须包含对应版本的 `TrayGroups.exe`、默认 `groups.ini`、`wallpapers.ini`、README 和两张带原图分辨率的壁纸；生成后校验包内容与 EXE 版本，并在发布说明中给出本地 ZIP 路径。更新版本号或包内文件后，重新生成本地 ZIP。
 
-例如本次版本：提交后执行 `git tag -a v1.7.2 -m "TrayGroups v1.7.2"`，再执行 `git push origin main v1.7.2`，最后确认 Actions 成功且 Release 的便携包可下载。
+例如本次版本：提交后执行 `git tag -a v1.7.3 -m "TrayGroups v1.7.3"`，再执行 `git push origin main v1.7.3`，最后确认 Actions 成功且 Release 的便携包可下载。
 
 ## 本地调试日志
 
