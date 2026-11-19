@@ -4,6 +4,7 @@ $failures = [System.Collections.Generic.List[string]]::new()
 
 foreach ($script in @(
     (Join-Path $PSScriptRoot 'core-modules.ps1'),
+    (Join-Path $PSScriptRoot 'wallpaper.ps1'),
     (Join-Path $PSScriptRoot 'recovery-lifecycle.ps1'),
     (Join-Path $PSScriptRoot 'capture-integration.ps1'),
     (Join-Path $PSScriptRoot 'run.ps1'),

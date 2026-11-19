@@ -245,6 +245,12 @@ static bool SettingsButtonsRegression(std::wstring &report) {
     CaptureTimer::settings.directory = directory;
     RemoveDirectoryW(firstDirectory.c_str());
     CaptureTimer::testOpenFolder = nullptr;
+    if (!WallpaperPageButtons(report))
+        ok = false;
+    clicked.insert({4, IDC_WALL_IDENTIFY});
+    clicked.insert({4, IDC_WALL_REFRESH});
+    clicked.insert({4, IDC_WALL_BROWSE});
+    clicked.insert({4, IDC_WALL_DEFAULT});
     SetDlgItemInt(settingsPages[1], IDC_PANEL_WIDTH, 480, FALSE);
     check(click(-1, IDCANCEL) && !settingsWindow && settingsConfig.panel.width != 480,
           L"Cancel button destroys the sheet and discards unapplied changes");
@@ -253,7 +259,7 @@ static bool SettingsButtonsRegression(std::wstring &report) {
     check(click(-1, IDOK) && !settingsWindow && settingsConfig.panel.width == 460,
           L"OK button applies changes then destroys the sheet");
     check(clicked == inventory,
-          L"every push button and checkbox in all five settings pages was clicked");
+          L"every push button and checkbox in all six settings pages was clicked");
     report += L"SettingsButtonCoverage=" + Number(clicked.size()) + L"/" +
               Number(inventory.size()) + L"\n";
     for (int page = 0; page < SettingsPageCount; ++page) {

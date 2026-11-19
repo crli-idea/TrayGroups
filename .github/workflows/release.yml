@@ -37,6 +37,10 @@ jobs:
         shell: pwsh
         run: .\test\core-modules.ps1
 
+      - name: Test monitor identity and wallpaper operations
+        shell: pwsh
+        run: .\test\wallpaper.ps1
+
       - name: Test capture and tray callback integration
         shell: pwsh
         run: .\test\capture-integration.ps1

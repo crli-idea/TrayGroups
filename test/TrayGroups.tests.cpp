@@ -380,6 +380,7 @@ static bool GuidRegression(std::wstring& report) {
 
 #include "TrayInspector.tests.h"
 #include "NativeTrayPanel.tests.h"
+#include "WallpaperPage.tests.h"
 #include "SettingsButtons.tests.h"
 
 static int UiSelfTest() {
@@ -400,7 +401,7 @@ static int UiSelfTest() {
     settingsConfig=TrayConfig::Settings{};settingsConfig.foldIcons=false;settingsConfig.iconMatch=L"path-class-id";SaveSettings();
     ShowSettings();check(settingsWindow&&IsWindowVisible(settingsWindow)&&ListView_GetItemCount(listWindow)>0,L"settings window visible with detected program icons");
     if(!settingsWindow||ListView_GetItemCount(listWindow)==0){WriteText(baseDir+L"\\ui-self-test.txt",report);return 1;}
-    check(TabCtrl_GetItemCount(settingsTabs)==5&&IsWindowVisible(settingsPages[0])&&!IsWindowVisible(settingsPages[1])&&!IsWindowVisible(settingsPages[2]),L"five system property pages with only the current page visible");
+    check(TabCtrl_GetItemCount(settingsTabs)==SettingsPageCount&&IsWindowVisible(settingsPages[0])&&!IsWindowVisible(settingsPages[1])&&!IsWindowVisible(settingsPages[2]),L"six system property pages with only the current page visible");
     check(SendMessageW(settingsWindow,WM_GETICON,ICON_SMALL,0)!=0,L"settings window has the T application icon");
     check((GetWindowLongPtrW(GetDlgItem(settingsWindow,IDC_APPLY),GWL_STYLE)&BS_TYPEMASK)!=BS_OWNERDRAW,
           L"standard property sheet buttons use system painting");
@@ -450,7 +451,7 @@ static int UiSelfTest() {
     ShowSettings();RECT actual;GetWindowRect(settingsWindow,&actual);
     check(actual.left==expected.left&&actual.top==expected.top,L"settings restores exact previous screen position after reopening");
     check(ImageList_GetImageCount(settingsImages)==ListView_GetItemCount(listWindow),L"one icon image per actual detected row");
-    for(int page=0;page<5;page++){
+    for(int page=0;page<SettingsPageCount;page++){
         SelectSettingsPage(page);RedrawWindow(settingsWindow,nullptr,nullptr,RDW_INVALIDATE|RDW_UPDATENOW|RDW_ALLCHILDREN);
         SaveTestWindow(settingsWindow,baseDir+L"\\settings-"+Number(GetDpiForWindow(settingsWindow))+L"-page-"+Number(page)+L".bmp");
         RECT client;GetClientRect(settingsPages[page],&client);bool fits=true;
@@ -510,7 +511,7 @@ static int UiSelfTest() {
     ProcessSettingsMessage(key);
     check(!settingsWindow,L"Escape closes the modeless settings dialog");
     check(CaptureTimer::GetPreferences().intervalMinutes==changedInterval,L"Cancel discards unapplied capture interval changes");
-    for(int closePage=0;closePage<5;++closePage) {
+    for(int closePage=0;closePage<SettingsPageCount;++closePage) {
         ShowSettings(closePage);HWND closing=settingsWindow;
         SendMessageW(closing,WM_SYSCOMMAND,SC_CLOSE,0);
         check(!settingsWindow&&!IsWindow(closing),(L"title-bar X / SC_CLOSE destroys settings page "+Number(closePage)).c_str());

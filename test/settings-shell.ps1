@@ -43,7 +43,7 @@ $checks = [System.Collections.Generic.List[string]]::new()
 $app = $null
 try {
     $app = Start-Process -FilePath $binary -WindowStyle Hidden -PassThru
-    foreach ($page in 0..4) {
+    foreach ($page in 0..5) {
         if ($page -gt 0) {
             $opener = Start-Process -FilePath $binary -WindowStyle Hidden -PassThru
             if (-not $opener.WaitForExit(5000)) { throw 'Second-instance settings request timed out.' }

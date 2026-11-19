@@ -4,12 +4,13 @@
 #include "TraySettingsIds.h"
 #include "TrayInspector.h"
 #include "UiStyle.h"
+#include "WallpaperPage.h"
 #include <uxtheme.h>
 
 static TrayConfig::Settings settingsDraft;
 static TrayIdentity::MatchState settingsMatchState;
 static TrayIdentity::Matcher settingsMatcher(settingsDraft, settingsMatchState);
-static constexpr int SettingsPageCount = 5;
+static constexpr int SettingsPageCount = 6;
 static HWND settingsTabs = nullptr, settingsPages[SettingsPageCount] = {};
 static CaptureTimer::Preferences captureDraft;
 static int settingsWidth = 1000, settingsHeight = 680;
@@ -263,6 +264,11 @@ static bool ApplySettings(HWND h) {
         MessageBoxW(h, error.c_str(), L"截图设置无效", MB_ICONWARNING);
         return false;
     }
+    if (!WallpaperPage::Validate(settingsPages[4], error)) {
+        SelectSettingsPage(4);
+        MessageBoxW(h, error.c_str(), L"壁纸设置无效", MB_ICONWARNING);
+        return false;
+    }
     settingsDraft.settingsX = settingsConfig.settingsX;
     settingsDraft.settingsY = settingsConfig.settingsY;
     settingsDraft.haveSettingsPosition = settingsConfig.haveSettingsPosition;
@@ -276,6 +282,18 @@ static bool ApplySettings(HWND h) {
         if (!settingsConfig.Save(configPath))
             error += L"\n分组配置回滚失败，请检查目录权限。";
         MessageBoxW(h, error.c_str(), L"未能应用", MB_ICONERROR);
+        return false;
+    }
+    if (!WallpaperPage::Apply(settingsPages[4], error)) {
+        if (!settingsConfig.Save(configPath))
+            error += L"\n分组配置回滚失败。";
+        if (captureChanged) {
+            std::wstring captureError;
+            if (!CaptureTimer::SavePreferences(captureDraft, captureError))
+                error += L"\n截图配置回滚失败：" + captureError;
+        }
+        SelectSettingsPage(4);
+        MessageBoxW(h, error.c_str(), L"壁纸未能应用", MB_ICONERROR);
         return false;
     }
     captureDraft = capture;
@@ -369,8 +387,13 @@ static INT_PTR CALLBACK SettingsPageProc(HWND page, UINT message, WPARAM w, LPAR
         EnableThemeDialogTexture(page, ETDT_ENABLETAB);
         return TRUE;
     }
+    // 壁纸页自行区分用户编辑与内部刷新，不能把刷新文本误记为全局草稿修改。
+    if (page == settingsPages[4] && (message == WM_COMMAND || message == WM_DESTROY))
+        return WallpaperPage::Handle(page, message, w, l);
     if (message == WM_NOTIFY) {
         auto *header = (NMHDR *)l;
+        if (page == settingsPages[4] && header->code == PSN_SETACTIVE)
+            WallpaperPage::Initialize(page, baseDir);
         if (header->code == PSN_APPLY) {
             bool success = page != settingsPages[0] || ApplySettings(settingsWindow);
             SetWindowLongPtrW(page, DWLP_MSGRESULT,
@@ -407,6 +430,9 @@ static LRESULT CALLBACK SettingsSheetProc(HWND window, UINT message, WPARAM w, L
     }
     if (message == WM_EXITSIZEMOVE)
         RememberSettingsPosition(window);
+    if (message == WM_DISPLAYCHANGE) {
+        WallpaperPage::Refresh(settingsPages[4]);
+    }
     if (message == WM_NCDESTROY) {
         KillTimer(window, 1);
         RememberSettingsPosition(window);
@@ -481,7 +507,8 @@ static void ShowSettings(int page) {
     captureDraft = CaptureTimer::GetPreferences();
     fillingSettings = true;
     HINSTANCE instance = GetModuleHandleW(nullptr);
-    const int templates[] = {IDD_GROUPS, IDD_APPEARANCE, IDD_CAPTURE, IDD_ADVANCED, IDD_ABOUT};
+    const int templates[] = {IDD_GROUPS,   IDD_APPEARANCE, IDD_CAPTURE,
+                             IDD_ADVANCED, IDD_WALLPAPER,  IDD_ABOUT};
     PROPSHEETPAGEW pages[SettingsPageCount] = {};
     for (int n = 0; n < SettingsPageCount; ++n) {
         pages[n].dwSize = sizeof(pages[n]);
@@ -569,7 +596,7 @@ static void ShowSettings(int page) {
     SendDlgItemMessageW(settingsPages[2], IDC_CAPTURE_FORMAT, EM_SETLIMITTEXT, 255, 0);
     SendDlgItemMessageW(settingsPages[2], IDC_CAPTURE_INTERVAL, EM_SETLIMITTEXT, 4, 0);
     SetDlgItemTextW(settingsPages[2], IDC_CAPTURE_STATUS, CaptureTimer::StatusText().c_str());
-    SetDlgItemTextW(settingsPages[4], IDC_ABOUT_VERSION,
+    SetDlgItemTextW(settingsPages[5], IDC_ABOUT_VERSION,
                     L"TrayGroups " TRAYGROUPS_WIDEN(TRAYGROUPS_VERSION_TEXT));
     fillingSettings = false;
     for (HWND current : settingsPages)

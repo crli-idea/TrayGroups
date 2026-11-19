@@ -682,6 +682,7 @@ static void RootMenu() {
     AppendMenuW(menu, MF_STRING, 1, L"设置分组…");
     AppendMenuW(menu, MF_STRING, 2, L"资源占用");
     CaptureTimer::AddMenu(menu);
+    AppendMenuW(menu, MF_STRING, 10, L"显示器壁纸…");
     AppendMenuW(menu, MF_STRING, 4, L"重新加载配置并刷新");
     AppendMenuW(menu, MF_STRING, 7, L"编辑 groups.ini 配置文件");
     AppendMenuW(menu, MF_STRING, 8, L"打开本地调试日志");
@@ -716,6 +717,10 @@ static void RootMenu() {
     }
     if (id == CaptureTimer::SettingsCommand) {
         ShowSettings(2);
+        return;
+    }
+    if (id == 10) {
+        ShowSettings(4);
         return;
     }
     if (CaptureTimer::HandleMenu(id))

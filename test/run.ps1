@@ -12,8 +12,8 @@ try {
     & (Join-Path $mingwBin 'windres.exe') -i TrayGroups.rc -o $resourceObject
     if ($LASTEXITCODE -ne 0) { throw 'Icon resource build failed.' }
 } finally { Pop-Location }
-$coreSources = @('config\TrayConfig.cpp','tray\TrayIdentity.cpp','tray\TrayGuid.cpp','tray\TrayDiagnostics.cpp','ui\TrayInspector.cpp') | ForEach-Object { Join-Path $projectRoot "src\$_" }
-& (Join-Path $mingwBin 'g++.exe') -std=c++17 -Os -s -static -fno-exceptions -fno-rtti -municode -mwindows '-Wl,--nxcompat,--dynamicbase' -o "$buildOutput\TrayGroups.tests.exe" "$PSScriptRoot\TrayGroups.tests.cpp" @coreSources $resourceObject -lcomctl32 -lshell32 -luser32 -lgdi32 -lpsapi -luxtheme -lz -lwtsapi32 -ladvapi32 -lole32 -luuid
+$coreSources = @('config\TrayConfig.cpp','tray\TrayIdentity.cpp','tray\TrayGuid.cpp','tray\TrayDiagnostics.cpp','ui\TrayInspector.cpp','ui\WallpaperPage.cpp','wallpaper\DesktopWallpaper.cpp') | ForEach-Object { Join-Path $projectRoot "src\$_" }
+& (Join-Path $mingwBin 'g++.exe') -std=c++17 -DNATIVE_TEST_BUILD= -Os -s -static -fno-exceptions -fno-rtti -municode -mwindows '-Wl,--nxcompat,--dynamicbase' -o "$buildOutput\TrayGroups.tests.exe" "$PSScriptRoot\TrayGroups.tests.cpp" @coreSources $resourceObject -lcomctl32 -lshell32 -luser32 -lgdi32 -lpsapi -luxtheme -lz -lwtsapi32 -ladvapi32 -lole32 -luuid -lsetupapi -lcomdlg32
 if ($LASTEXITCODE -ne 0) { throw 'Test build failed.' }
 $testProcess = Start-Process -FilePath "$buildOutput\TrayGroups.tests.exe" -WindowStyle Hidden -PassThru
 if (-not $testProcess.WaitForExit(25000)) { throw 'Test timeout.' }
